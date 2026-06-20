@@ -6,6 +6,8 @@
   import type { MidiController } from '../lib/midi/midi.svelte';
   import type { MidiNoteEvent } from '../lib/midi/types';
   import { pitchName } from '../lib/midi/types';
+  import ConnBadge from './ConnBadge.svelte';
+  import PianoKeyboard from './PianoKeyboard.svelte';
 
   let {
     midi,
@@ -13,6 +15,9 @@
     title,
     onBack
   }: { midi: MidiController; xml: string; title: string; onBack: () => void } = $props();
+
+  const RIGHT_COLOR = '#4f46e5';
+  const LEFT_COLOR = '#f59e0b';
 
   const engine = new GradingEngine();
 
@@ -24,12 +29,18 @@
   let staffCount = $state(1);
   let staffIndex = $state(0);
 
-  // Reactive mirror of the engine state, refreshed after each event.
   let status = $state<GradingStatus>('empty');
   let index = $state(0);
   let total = $state(0);
   let errors = $state(0);
   let expected = $state<number[]>([]);
+  let keyLow = $state(60);
+  let keyHigh = $state(72);
+
+  const progress = $derived(total === 0 ? 0 : Math.round((index / total) * 100));
+  const accuracy = $derived(total + errors === 0 ? 100 : Math.round((total / (total + errors)) * 100));
+  const handColor = $derived(staffIndex === 0 ? RIGHT_COLOR : LEFT_COLOR);
+  const handName = $derived(staffCount > 1 ? (staffIndex === 0 ? 'Right hand' : 'Left hand') : '');
 
   let unsubscribe: (() => void) | undefined;
 
@@ -57,9 +68,22 @@
     expected = engine.currentPitches;
   }
 
-  function startPractice() {
+  /** Whole-octave (C..C) range covering all step pitches, for the keyboard. */
+  function computeRange(allPitches: number[]) {
+    if (allPitches.length === 0) return;
+    const min = Math.min(...allPitches);
+    const max = Math.max(...allPitches);
+    keyLow = min - (((min % 12) + 12) % 12);
+    keyHigh = max + ((12 - (((max % 12) + 12) % 12)) % 12);
+  }
+
+  async function startPractice() {
     if (!renderer) return;
+    // Connect on demand: pressing Start is a user gesture, so the MIDI prompt works here.
+    if (midi.status !== 'connected') await midi.connect();
+
     steps = renderer.extractSteps({ staffIndex });
+    computeRange(steps.flatMap((s) => s.pitches));
     engine.load(steps);
     renderer.reset();
     renderer.clearHighlight();
@@ -112,28 +136,27 @@
 <section class="score">
   <header>
     <div class="left">
-      <button class="ghost" onclick={onBack}>← Library</button>
+      <button class="ghost back" onclick={onBack} aria-label="Back to library">←</button>
       <h2>{title}</h2>
     </div>
     <div class="controls">
+      <ConnBadge {midi} />
+      {#if staffCount > 1}
+        <div class="staffpick">
+          {#each Array(staffCount) as _, i (i)}
+            <button class="seg" class:active={i === staffIndex} onclick={() => selectStaff(i)}>
+              {staffLabel(i)}
+            </button>
+          {/each}
+        </div>
+      {/if}
       {#if status === 'playing'}
-        <button class="ghost" onclick={restart}>⏮ Restart</button>
+        <button class="ghost" onclick={restart}>↻ Restart</button>
       {:else}
         <button onclick={startPractice} disabled={!loaded}>▶ Start practice</button>
       {/if}
     </div>
   </header>
-
-  {#if staffCount > 1}
-    <div class="staffpick">
-      <span class="label">Practice:</span>
-      {#each Array(staffCount) as _, i (i)}
-        <button class="seg" class:active={i === staffIndex} onclick={() => selectStaff(i)}>
-          {staffLabel(i)}
-        </button>
-      {/each}
-    </div>
-  {/if}
 
   {#if error}
     <p class="error">Failed: {error}</p>
@@ -141,17 +164,39 @@
 
   {#if status === 'playing'}
     <div class="hud">
-      <span>Note <strong>{index + 1}</strong> / {total}</span>
-      <span class="expected">Play: {expected.map((p) => pitchName(p)).join(' + ') || '—'}</span>
-      <span class="errors">Mistakes: {errors}</span>
+      <div class="cue">
+        <span class="cue-label">Play this</span>
+        <span class="cue-note">{expected.map((p) => pitchName(p)).join(' + ') || '—'}</span>
+      </div>
+      <div class="prog">
+        <div class="prog-top">
+          <span>Note {index + 1} of {total}</span>
+          <span class="mistakes" class:bad={errors > 0}>{errors} mistake{errors === 1 ? '' : 's'}</span>
+        </div>
+        <div class="bar"><div class="fill" style="width:{progress}%"></div></div>
+      </div>
+    </div>
+
+    <div class="keyboard">
+      {#if handName}
+        <span class="hand" style="color:{handColor}">{handName}</span>
+      {/if}
+      <PianoKeyboard low={keyLow} high={keyHigh} highlight={expected} color={handColor} />
     </div>
   {:else if status === 'completed'}
     <div class="done">
-      🎉 Finished — {total} notes, {errors} mistake{errors === 1 ? '' : 's'}.
-      <button class="ghost" onclick={restart}>Play again</button>
+      <div class="done-emoji">🎉</div>
+      <div class="done-title">Nicely done!</div>
+      <div class="stats">
+        <div class="stat"><span class="n">{total}</span><span class="l">notes</span></div>
+        <div class="stat"><span class="n">{errors}</span><span class="l">mistakes</span></div>
+        <div class="stat"><span class="n">{accuracy}%</span><span class="l">accuracy</span></div>
+      </div>
+      <div class="done-actions">
+        <button onclick={restart}>↻ Play again</button>
+        <button class="ghost" onclick={onBack}>← Library</button>
+      </div>
     </div>
-  {:else if loaded && midi.status !== 'connected'}
-    <p class="hint">Connect your MIDI keyboard above, then start practice.</p>
   {/if}
 
   <div class="sheet" bind:this={container}></div>
@@ -160,85 +205,186 @@
 <style>
   .score {
     background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 1rem 1.25rem 1.25rem;
+    box-shadow: var(--shadow);
+    padding: 1.1rem 1.25rem 1.35rem;
   }
   header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.9rem;
     flex-wrap: wrap;
   }
   .left {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.7rem;
+    min-width: 0;
+  }
+  .back {
+    padding: 0.45rem 0.7rem;
   }
   h2 {
-    font-size: 1rem;
+    font-size: 1.1rem;
     margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .controls {
     display: flex;
     gap: 0.5rem;
     flex-wrap: wrap;
-  }
-  .ghost {
-    background: var(--surface-2);
-    color: var(--text);
-    font-weight: 500;
+    align-items: center;
   }
   .staffpick {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    margin-bottom: 0.75rem;
-    font-size: 0.9rem;
-  }
-  .staffpick .label {
-    color: var(--muted);
+    display: inline-flex;
+    background: var(--surface-2);
+    border-radius: 999px;
+    padding: 0.2rem;
   }
   .seg {
-    background: var(--surface-2);
+    background: transparent;
     color: var(--muted);
-    padding: 0.3rem 0.7rem;
-    font-weight: 500;
+    padding: 0.3rem 0.8rem;
+    font-weight: 600;
+    font-size: 0.85rem;
+    border-radius: 999px;
+  }
+  .seg:hover {
+    background: transparent;
+    color: var(--text);
   }
   .seg.active {
-    background: var(--accent);
-    color: #10131a;
+    background: var(--surface);
+    color: var(--accent);
+    box-shadow: var(--shadow-sm);
   }
+
+  /* Practice HUD */
   .hud {
     display: flex;
-    gap: 1.5rem;
-    flex-wrap: wrap;
     align-items: center;
-    background: var(--surface-2);
-    border-radius: 8px;
-    padding: 0.5rem 0.9rem;
+    gap: 1.25rem;
+    background: var(--accent-soft);
+    border-radius: var(--radius-sm);
+    padding: 0.9rem 1.1rem;
     margin-bottom: 0.75rem;
-    font-size: 0.95rem;
+    flex-wrap: wrap;
   }
-  .hud strong {
+  .cue {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+  .cue-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #6d63d6;
+    font-weight: 700;
+  }
+  .cue-note {
+    font-size: 2rem;
+    font-weight: 800;
+    line-height: 1;
     color: var(--accent);
+    font-variant-numeric: tabular-nums;
   }
-  .errors {
+  .prog {
+    flex: 1;
+    min-width: 180px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .prog-top {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
     color: var(--muted);
   }
+  .mistakes.bad {
+    color: var(--error);
+    font-weight: 600;
+  }
+  .bar {
+    height: 8px;
+    background: rgba(79, 70, 229, 0.15);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 999px;
+    transition: width 0.2s ease;
+  }
+
+  /* Keyboard strip */
+  .keyboard {
+    margin-bottom: 0.9rem;
+  }
+  .hand {
+    display: inline-block;
+    font-size: 0.78rem;
+    font-weight: 700;
+    margin-bottom: 0.35rem;
+  }
+
+  /* Completion */
   .done {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 1rem;
-    background: var(--surface-2);
-    border-radius: 8px;
-    padding: 0.6rem 0.9rem;
-    margin-bottom: 0.75rem;
+    gap: 0.6rem;
+    background: var(--ok-soft);
+    border-radius: var(--radius-sm);
+    padding: 1.4rem 1rem;
+    margin-bottom: 0.9rem;
+    text-align: center;
   }
+  .done-emoji {
+    font-size: 2.2rem;
+  }
+  .done-title {
+    font-size: 1.2rem;
+    font-weight: 700;
+  }
+  .stats {
+    display: flex;
+    gap: 2rem;
+    margin: 0.3rem 0 0.6rem;
+  }
+  .stat {
+    display: flex;
+    flex-direction: column;
+  }
+  .stat .n {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--text);
+  }
+  .stat .l {
+    font-size: 0.78rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .done-actions {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
   .sheet {
     background: #ffffff;
-    border-radius: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     padding: 0.5rem;
     overflow-x: auto;
     scroll-behavior: smooth;
@@ -246,10 +392,5 @@
   .error {
     color: var(--error);
     margin: 0 0 0.5rem;
-  }
-  .hint {
-    color: var(--muted);
-    margin: 0 0 0.5rem;
-    font-size: 0.9rem;
   }
 </style>

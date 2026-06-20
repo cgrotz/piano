@@ -8,12 +8,13 @@ import basicSsl from '@vitejs/plugin-basic-ssl';
 // HTTPS — use `npm run dev:https` (self-signed cert; accept the browser warning once).
 const useHttps = !!process.env.HTTPS;
 
-export default defineConfig({
-  // GitHub Pages project site is served from a subpath. This base is applied to
-  // asset URLs AND picked up by vite-plugin-pwa for the service-worker scope and
-  // manifest start_url — both must match or the deployed page goes blank / the PWA
-  // fails to register. Dev server therefore serves at http://localhost:5173/piano/.
-  base: '/piano/',
+export default defineConfig(({ command }) => ({
+  // GitHub Pages project site is served from a subpath, so the production build
+  // uses '/piano/' (applied to asset URLs AND picked up by vite-plugin-pwa for the
+  // service-worker scope / manifest start_url — both must match or the deployed page
+  // goes blank). Dev serves from root for cleaner local URLs and preview tooling.
+  base: command === 'build' ? '/piano/' : '/',
+  server: process.env.PORT ? { port: Number(process.env.PORT) } : undefined,
   plugins: [
     svelte(),
     useHttps ? basicSsl() : undefined,
@@ -40,4 +41,4 @@ export default defineConfig({
       }
     })
   ].filter(Boolean)
-});
+}));

@@ -41,11 +41,12 @@ implementation, and the `MusicImporter` that resolves `.mxl` via `META-INF/conta
 
 ```sh
 npm install
-npm run dev        # http://localhost:5173/piano/  (localhost is a secure context → Web MIDI works)
+npm run dev        # http://localhost:5173/  (localhost is a secure context → Web MIDI works)
 ```
 
-> The dev URL includes `/piano/` because the app is configured for a GitHub Pages
-> project site (`base: '/piano/'`). Same base in dev and prod catches path bugs early.
+> Dev serves from root; the **production build** uses `base: '/piano/'` for the GitHub
+> Pages project site (see `vite.config.ts`). The build output paths are verified, so this
+> split is safe and keeps local URLs clean.
 
 ### Testing on the Android tablet
 

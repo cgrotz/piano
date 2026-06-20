@@ -64,6 +64,11 @@ export class MidiController {
     return () => this.#subscribers.delete(fn);
   }
 
+  /** Inject a note event as if it came from the device (for testing/automation). */
+  emitForTest(event: MidiNoteEvent): void {
+    for (const fn of this.#subscribers) fn(event);
+  }
+
   clearLog(): void {
     this.log = [];
   }
