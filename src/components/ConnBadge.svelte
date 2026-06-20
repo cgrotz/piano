@@ -38,8 +38,10 @@
   class:link={canConnect}
   onclick={() => canConnect && midi.connect()}
   disabled={!canConnect && midi.status !== 'connected'}
-  title={canConnect ? 'Connect MIDI keyboard' : label}>
-  <span class="dot"></span>
+  title={canConnect ? 'Connect MIDI keyboard' : label}
+  aria-label={canConnect ? 'Connect MIDI keyboard' : `MIDI status: ${label}`}
+  aria-live="polite">
+  <span class="dot" aria-hidden="true"></span>
   <span class="txt">{label}</span>
 </button>
 

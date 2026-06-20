@@ -79,7 +79,7 @@
     overflow-y: hidden;
   }
   .kbd {
-    height: 150px;
+    height: 100px;
     width: auto;
     display: block;
     margin: 0 auto;

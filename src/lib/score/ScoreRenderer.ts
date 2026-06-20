@@ -23,7 +23,11 @@ export class ScoreRenderer {
     this.#osmd = new OpenSheetMusicDisplay(container, {
       autoResize: true,
       backend: 'svg',
-      drawTitle: true,
+      drawTitle: false,
+      drawSubtitle: false,
+      drawComposer: false,
+      drawCredits: false,
+      renderSingleHorizontalStaffline: true,
       followCursor: true
     });
   }

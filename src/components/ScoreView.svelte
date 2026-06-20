@@ -129,11 +129,9 @@
     sync();
   }
 
-  const staffLabel = (i: number) =>
-    staffCount === 2 ? (i === 0 ? 'Right hand' : 'Left hand') : `Staff ${i + 1}`;
 </script>
 
-<section class="score">
+<section class="score" aria-label="Score player">
   <header>
     <div class="left">
       <button class="ghost back" onclick={onBack} aria-label="Back to library">←</button>
@@ -142,16 +140,25 @@
     <div class="controls">
       <ConnBadge {midi} />
       {#if staffCount > 1}
-        <div class="staffpick">
-          {#each Array(staffCount) as _, i (i)}
-            <button class="seg" class:active={i === staffIndex} onclick={() => selectStaff(i)}>
-              {staffLabel(i)}
+        <div class="staffpick" role="group" aria-label="Staff selection">
+          {#if staffCount === 2}
+            <button class="seg" class:active={staffIndex === 1} onclick={() => selectStaff(1)} aria-pressed={staffIndex === 1}>
+              Left hand
             </button>
-          {/each}
+            <button class="seg" class:active={staffIndex === 0} onclick={() => selectStaff(0)} aria-pressed={staffIndex === 0}>
+              Right hand
+            </button>
+          {:else}
+            {#each Array(staffCount) as _, i (i)}
+              <button class="seg" class:active={i === staffIndex} onclick={() => selectStaff(i)} aria-pressed={i === staffIndex}>
+                Staff {i + 1}
+              </button>
+            {/each}
+          {/if}
         </div>
       {/if}
       {#if status === 'playing'}
-        <button class="ghost" onclick={restart}>↻ Restart</button>
+        <button class="ghost" onclick={restart} aria-label="Restart practice">↻ Restart</button>
       {:else}
         <button onclick={startPractice} disabled={!loaded}>▶ Start practice</button>
       {/if}
@@ -159,32 +166,18 @@
   </header>
 
   {#if error}
-    <p class="error">Failed: {error}</p>
+    <p class="error" role="alert">Failed: {error}</p>
   {/if}
 
-  {#if status === 'playing'}
-    <div class="hud">
-      <div class="cue">
-        <span class="cue-label">Play this</span>
-        <span class="cue-note">{expected.map((p) => pitchName(p)).join(' + ') || '—'}</span>
-      </div>
-      <div class="prog">
-        <div class="prog-top">
-          <span>Note {index + 1} of {total}</span>
-          <span class="mistakes" class:bad={errors > 0}>{errors} mistake{errors === 1 ? '' : 's'}</span>
-        </div>
-        <div class="bar"><div class="fill" style="width:{progress}%"></div></div>
-      </div>
-    </div>
+  <div class="keyboard">
+    {#if handName}
+      <span class="hand" style="color:{handColor}">{handName}</span>
+    {/if}
+    <PianoKeyboard low={keyLow} high={keyHigh} highlight={status === 'playing' ? expected : []} color={handColor} />
+  </div>
 
-    <div class="keyboard">
-      {#if handName}
-        <span class="hand" style="color:{handColor}">{handName}</span>
-      {/if}
-      <PianoKeyboard low={keyLow} high={keyHigh} highlight={expected} color={handColor} />
-    </div>
-  {:else if status === 'completed'}
-    <div class="done">
+  {#if status === 'completed'}
+    <div class="done" role="status" aria-label="Practice complete">
       <div class="done-emoji">🎉</div>
       <div class="done-title">Nicely done!</div>
       <div class="stats">
@@ -199,7 +192,7 @@
     </div>
   {/if}
 
-  <div class="sheet" bind:this={container}></div>
+  <div class="sheet" bind:this={container} aria-label="Sheet music notation"></div>
 </section>
 
 <style>
@@ -262,66 +255,6 @@
     background: var(--surface);
     color: var(--accent);
     box-shadow: var(--shadow-sm);
-  }
-
-  /* Practice HUD */
-  .hud {
-    display: flex;
-    align-items: center;
-    gap: 1.25rem;
-    background: var(--accent-soft);
-    border-radius: var(--radius-sm);
-    padding: 0.9rem 1.1rem;
-    margin-bottom: 0.75rem;
-    flex-wrap: wrap;
-  }
-  .cue {
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-  }
-  .cue-label {
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: #6d63d6;
-    font-weight: 700;
-  }
-  .cue-note {
-    font-size: 2rem;
-    font-weight: 800;
-    line-height: 1;
-    color: var(--accent);
-    font-variant-numeric: tabular-nums;
-  }
-  .prog {
-    flex: 1;
-    min-width: 180px;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-  .prog-top {
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.85rem;
-    color: var(--muted);
-  }
-  .mistakes.bad {
-    color: var(--error);
-    font-weight: 600;
-  }
-  .bar {
-    height: 8px;
-    background: rgba(79, 70, 229, 0.15);
-    border-radius: 999px;
-    overflow: hidden;
-  }
-  .fill {
-    height: 100%;
-    background: var(--accent);
-    border-radius: 999px;
-    transition: width 0.2s ease;
   }
 
   /* Keyboard strip */

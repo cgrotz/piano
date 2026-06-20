@@ -34,10 +34,10 @@
     </p>
   {/if}
   {#if midi.error}
-    <p class="note error">{midi.error}</p>
+    <p class="note error" role="alert">{midi.error}</p>
   {/if}
   {#if openError}
-    <p class="note error">{openError}</p>
+    <p class="note error" role="alert">{openError}</p>
   {/if}
 
   {#if selection}

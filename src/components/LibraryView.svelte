@@ -40,7 +40,7 @@
   const onlyBuiltIn = $derived(library.entries.every((e) => e.builtIn));
 </script>
 
-<section class="library">
+<section class="library" aria-label="Music library">
   <header>
     <div class="brand">
       <img src={iconUrl} alt="" width="30" height="30" />
@@ -48,20 +48,20 @@
     </div>
     <div class="head-actions">
       <ConnBadge {midi} />
-      <label class="filebtn" class:busy={library.importing}>
+      <label class="filebtn" class:busy={library.importing} aria-label={library.importing ? 'Importing file, please wait' : 'Import a MusicXML file'} aria-busy={library.importing}>
         {#if !library.importing}
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
             <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
           </svg>
         {/if}
         {library.importing ? 'Importing…' : 'Import'}
-        <input type="file" accept=".xml,.musicxml,.mxl" onchange={handleFile} disabled={library.importing} />
+        <input type="file" accept=".xml,.musicxml,.mxl" onchange={handleFile} disabled={library.importing} aria-hidden="true" tabindex="-1" />
       </label>
     </div>
   </header>
 
   {#if midi.status !== 'connected'}
-    <div class="banner">
+    <div class="banner" role="status">
       🎹 Connect your MIDI keyboard (top right) to start practicing.
     </div>
   {:else if onlyBuiltIn}
@@ -72,10 +72,10 @@
   {/if}
 
   {#if library.error}
-    <p class="error">{library.error}</p>
+    <p class="error" role="alert">{library.error}</p>
   {/if}
 
-  <ul class="list">
+  <ul class="list" aria-label="Scores">
     {#each library.entries as entry (entry.id)}
       <li>
         <button class="card" onclick={() => onOpen(entry)}>
@@ -159,6 +159,7 @@
   .filebtn.busy {
     opacity: 0.6;
     cursor: progress;
+    pointer-events: none;
   }
   .filebtn input {
     display: none;
