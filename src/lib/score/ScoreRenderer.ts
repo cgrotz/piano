@@ -27,8 +27,7 @@ export class ScoreRenderer {
       drawSubtitle: false,
       drawComposer: false,
       drawCredits: false,
-      renderSingleHorizontalStaffline: true,
-      followCursor: true
+      renderSingleHorizontalStaffline: true
     });
   }
 

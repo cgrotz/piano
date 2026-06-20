@@ -43,8 +43,25 @@
   const handName = $derived(staffCount > 1 ? (staffIndex === 0 ? 'Right hand' : 'Left hand') : '');
 
   let unsubscribe: (() => void) | undefined;
+  let wakeLock: WakeLockSentinel | null = null;
+
+  async function acquireWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    try { wakeLock = await navigator.wakeLock.request('screen'); }
+    catch { /* denied or unsupported — practice still works, screen may sleep */ }
+  }
+
+  function releaseWakeLock() {
+    wakeLock?.release();
+    wakeLock = null;
+  }
+
+  function onVisibilityChange() {
+    if (document.visibilityState === 'visible' && status === 'playing') acquireWakeLock();
+  }
 
   onMount(async () => {
+    document.addEventListener('visibilitychange', onVisibilityChange);
     try {
       renderer = new ScoreRenderer(container);
       await renderer.load(xml);
@@ -56,6 +73,8 @@
   });
 
   onDestroy(() => {
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    releaseWakeLock();
     unsubscribe?.();
     renderer?.dispose();
   });
@@ -91,6 +110,7 @@
     unsubscribe?.();
     unsubscribe = midi.subscribe(onNote);
     sync();
+    acquireWakeLock();
   }
 
   function restart() {
@@ -124,6 +144,7 @@
       case 'completed':
         renderer.clearHighlight();
         renderer.finish();
+        releaseWakeLock();
         break;
     }
     sync();
