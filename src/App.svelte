@@ -52,11 +52,13 @@
 <style>
   main {
     width: 100%;
+    height: 100%;
     margin: 0;
-    padding: 1rem 1.25rem 2.5rem;
+    padding: 1rem 1.25rem;
     display: flex;
     flex-direction: column;
     gap: 1rem;
+    overflow: hidden;
   }
   .note {
     margin: 0;

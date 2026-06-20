@@ -115,6 +115,11 @@
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     padding: 1.1rem 1.25rem 1.35rem;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
   header {
     display: flex;
@@ -189,6 +194,9 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
   }
   .list li {
     display: flex;

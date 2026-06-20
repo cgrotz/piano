@@ -223,6 +223,11 @@
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     padding: 1.1rem 1.25rem 1.35rem;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
   header {
     display: flex;
@@ -341,7 +346,10 @@
     border-radius: var(--radius-sm);
     padding: 0.5rem;
     overflow-x: auto;
+    overflow-y: hidden;
     scroll-behavior: smooth;
+    flex: 1;
+    min-height: 0;
   }
   .error {
     color: var(--error);
