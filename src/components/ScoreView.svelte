@@ -17,6 +17,7 @@
 
   const RIGHT_COLOR = '#4f46e5';
   const LEFT_COLOR = '#f59e0b';
+  const WRONG_COLOR = '#e5544b'; // matches the sheet's wrong-note flash
 
   const engine = new GradingEngine();
 
@@ -56,6 +57,18 @@
     if (!bothHands) return handColor;
     return leftByIndex.get(curCursorIndex)?.has(n) ? LEFT_COLOR : RIGHT_COLOR;
   }
+
+  /**
+   * Every lit key and its color: the target note(s) as a hand-colored cue, plus
+   * the keys you're physically holding — hand color if correct, red if wrong.
+   */
+  const litKeys = $derived.by(() => {
+    const m = new Map<number, string>();
+    if (status !== 'playing') return m;
+    for (const p of expected) m.set(p, keyColor(p)); // target cue
+    for (const p of midi.heldNotes) m.set(p, expected.includes(p) ? keyColor(p) : WRONG_COLOR);
+    return m;
+  });
 
   let unsubscribe: (() => void) | undefined;
   let wakeLock: WakeLockSentinel | null = null;
@@ -246,8 +259,7 @@
       <PianoKeyboard
         low={keyLow}
         high={keyHigh}
-        highlight={status === 'playing' ? expected : []}
-        colorFor={keyColor}
+        keyColors={litKeys}
         height={viewMode === 'piano' ? 220 : 100} />
     </div>
   {/if}

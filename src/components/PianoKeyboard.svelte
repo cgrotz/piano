@@ -4,15 +4,13 @@
   let {
     low,
     high,
-    highlight,
-    colorFor,
+    keyColors,
     height = 120
   }: {
     low: number;
     high: number;
-    highlight: number[];
-    /** Fill color for a highlighted key (lets callers color-code by hand). */
-    colorFor: (n: number) => string;
+    /** Pitch -> fill color for every lit key. Absent keys render unlit. */
+    keyColors: Map<number, string>;
     height?: number;
   } = $props();
 
@@ -39,8 +37,6 @@
     return { whites, blacks, W: Math.max(whiteCount, 1) };
   });
 
-  const hi = $derived(new Set(highlight));
-
   // Cap how wide a single white key may get, proportional to height, so a narrow
   // range doesn't stretch into absurdly wide keys — the keyboard centers instead.
   const MAX_WHITE_RATIO = 0.42;
@@ -59,8 +55,8 @@
   aria-label="piano keys to play">
   <div class="whites">
     {#each layout.whites as n (n)}
-      <div class="wk" class:on={hi.has(n)} style={hi.has(n) ? `background:${colorFor(n)}` : ''}>
-        {#if hi.has(n)}<span class="lbl">{pitchName(n)}</span>{/if}
+      <div class="wk" class:on={keyColors.has(n)} style={keyColors.has(n) ? `background:${keyColors.get(n)}` : ''}>
+        {#if keyColors.has(n)}<span class="lbl">{pitchName(n)}</span>{/if}
       </div>
     {/each}
   </div>
@@ -68,11 +64,11 @@
     {#each layout.blacks as b (b.n)}
       <div
         class="bk"
-        class:on={hi.has(b.n)}
-        style="left:{blackLeftPct(b.after)}%; width:{blackWidthPct}%; {hi.has(b.n)
-          ? `background:${colorFor(b.n)}`
+        class:on={keyColors.has(b.n)}
+        style="left:{blackLeftPct(b.after)}%; width:{blackWidthPct}%; {keyColors.has(b.n)
+          ? `background:${keyColors.get(b.n)}`
           : ''}">
-        {#if hi.has(b.n)}<span class="lbl">{pitchName(b.n)}</span>{/if}
+        {#if keyColors.has(b.n)}<span class="lbl">{pitchName(b.n)}</span>{/if}
       </div>
     {/each}
   </div>
