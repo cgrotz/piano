@@ -6,7 +6,7 @@
     high,
     highlight,
     colorFor,
-    height = 100
+    height = 120
   }: {
     low: number;
     high: number;
@@ -16,80 +16,118 @@
     height?: number;
   } = $props();
 
-  const WHITE_W = 24;
-  const WHITE_H = 132;
-  const BLACK_W = 15;
-  const BLACK_H = 84;
   const WHITE_CLASSES = new Set([0, 2, 4, 5, 7, 9, 11]);
   const isWhite = (n: number) => WHITE_CLASSES.has(((n % 12) + 12) % 12);
 
-  type Key = { n: number; x: number; white: boolean };
+  // Fraction of a white-key width that a black key spans.
+  const BLACK_FRAC = 0.62;
 
-  const keys = $derived.by(() => {
-    const arr: Key[] = [];
+  type Black = { n: number; after: number }; // `after` = white keys to its left
+
+  const layout = $derived.by(() => {
+    const whites: number[] = [];
+    const blacks: Black[] = [];
     let whiteCount = 0;
     for (let n = low; n <= high; n++) {
       if (isWhite(n)) {
-        arr.push({ n, x: whiteCount * WHITE_W, white: true });
+        whites.push(n);
         whiteCount++;
       } else {
-        arr.push({ n, x: whiteCount * WHITE_W - BLACK_W / 2, white: false });
+        blacks.push({ n, after: whiteCount });
       }
     }
-    return arr;
+    return { whites, blacks, W: Math.max(whiteCount, 1) };
   });
-  const whiteKeys = $derived(keys.filter((k) => k.white));
-  const blackKeys = $derived(keys.filter((k) => !k.white));
-  const vbW = $derived(whiteKeys.length * WHITE_W);
+
   const hi = $derived(new Set(highlight));
+
+  // Cap how wide a single white key may get, proportional to height, so a narrow
+  // range doesn't stretch into absurdly wide keys — the keyboard centers instead.
+  const MAX_WHITE_RATIO = 0.42;
+  const maxKbdWidth = $derived(layout.W * height * MAX_WHITE_RATIO);
+
+  // Black-key geometry as percentages of the full keyboard width (so it scales
+  // with whatever width the flex white keys end up at — no fixed pixels, no scroll).
+  const blackWidthPct = $derived((BLACK_FRAC / layout.W) * 100);
+  const blackLeftPct = (after: number) => (after / layout.W) * 100 - blackWidthPct / 2;
 </script>
 
-<div class="kbd-wrap">
-<svg
+<div
   class="kbd"
-  style="height:{height}px"
-  viewBox="0 0 {vbW} {WHITE_H}"
-  preserveAspectRatio="xMidYMid meet"
+  style="height:{height}px; max-width:{maxKbdWidth}px"
   role="img"
   aria-label="piano keys to play">
-  {#each whiteKeys as k (k.n)}
-    <rect
-      x={k.x + 0.5}
-      y="0.5"
-      width={WHITE_W - 1}
-      height={WHITE_H - 1}
-      rx="3"
-      fill={hi.has(k.n) ? colorFor(k.n) : '#ffffff'}
-      stroke="#c2c9d4"
-      stroke-width="1" />
-    {#if hi.has(k.n)}
-      <text x={k.x + WHITE_W / 2} y={WHITE_H - 12} text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff">
-        {pitchName(k.n)}
-      </text>
-    {/if}
-  {/each}
-  {#each blackKeys as k (k.n)}
-    <rect
-      x={k.x}
-      y="0"
-      width={BLACK_W}
-      height={BLACK_H}
-      rx="2.5"
-      fill={hi.has(k.n) ? colorFor(k.n) : '#2a2f3a'}
-      stroke="#1a1d24"
-      stroke-width="1" />
-  {/each}
-</svg>
+  <div class="whites">
+    {#each layout.whites as n (n)}
+      <div class="wk" class:on={hi.has(n)} style={hi.has(n) ? `background:${colorFor(n)}` : ''}>
+        {#if hi.has(n)}<span class="lbl">{pitchName(n)}</span>{/if}
+      </div>
+    {/each}
+  </div>
+  <div class="blacks" aria-hidden="true">
+    {#each layout.blacks as b (b.n)}
+      <div
+        class="bk"
+        class:on={hi.has(b.n)}
+        style="left:{blackLeftPct(b.after)}%; width:{blackWidthPct}%; {hi.has(b.n)
+          ? `background:${colorFor(b.n)}`
+          : ''}">
+        {#if hi.has(b.n)}<span class="lbl">{pitchName(b.n)}</span>{/if}
+      </div>
+    {/each}
+  </div>
 </div>
 
 <style>
-  .kbd-wrap {
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
   .kbd {
-    width: auto;
-    display: block;
+    position: relative;
+    width: 100%;
     margin: 0 auto;
+    user-select: none;
+  }
+  .whites {
+    display: flex;
+    height: 100%;
+  }
+  .wk {
+    flex: 1 1 0;
+    min-width: 0;
+    background: #ffffff;
+    border: 1px solid #c2c9d4;
+    border-radius: 0 0 4px 4px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .wk:not(:first-child) {
+    border-left: none;
+  }
+  .blacks {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .bk {
+    position: absolute;
+    top: 0;
+    height: 63%;
+    background: #2a2f3a;
+    border: 1px solid #1a1d24;
+    border-radius: 0 0 3px 3px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .lbl {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #ffffff;
+    padding-bottom: 0.4rem;
+    line-height: 1;
+    pointer-events: none;
+  }
+  .bk .lbl {
+    font-size: 0.62rem;
+    padding-bottom: 0.25rem;
   }
 </style>

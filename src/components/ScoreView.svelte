@@ -102,13 +102,22 @@
     curCursorIndex = steps[engine.index]?.cursorIndex ?? -1;
   }
 
-  /** Whole-octave (C..C) range covering all step pitches, for the keyboard. */
+  const BLACK_CLASSES = new Set([1, 3, 6, 8, 10]);
+  const isBlack = (n: number) => BLACK_CLASSES.has(((n % 12) + 12) % 12);
+
+  /**
+   * Crop the keyboard to exactly the played range. If an endpoint lands on a
+   * black key, nudge it outward to the neighbouring white key so the keyboard
+   * doesn't start or end on a floating black key.
+   */
   function computeRange(allPitches: number[]) {
     if (allPitches.length === 0) return;
-    const min = Math.min(...allPitches);
-    const max = Math.max(...allPitches);
-    keyLow = min - (((min % 12) + 12) % 12);
-    keyHigh = max + ((12 - (((max % 12) + 12) % 12)) % 12);
+    let min = Math.min(...allPitches);
+    let max = Math.max(...allPitches);
+    if (isBlack(min)) min -= 1; // white key a semitone below (e.g. C# -> C)
+    if (isBlack(max)) max += 1; // white key a semitone above (e.g. F# -> G)
+    keyLow = min;
+    keyHigh = max;
   }
 
   async function startPractice() {
