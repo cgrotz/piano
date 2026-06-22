@@ -5,8 +5,16 @@
     low,
     high,
     highlight,
-    color
-  }: { low: number; high: number; highlight: number[]; color: string } = $props();
+    colorFor,
+    height = 100
+  }: {
+    low: number;
+    high: number;
+    highlight: number[];
+    /** Fill color for a highlighted key (lets callers color-code by hand). */
+    colorFor: (n: number) => string;
+    height?: number;
+  } = $props();
 
   const WHITE_W = 24;
   const WHITE_H = 132;
@@ -39,6 +47,7 @@
 <div class="kbd-wrap">
 <svg
   class="kbd"
+  style="height:{height}px"
   viewBox="0 0 {vbW} {WHITE_H}"
   preserveAspectRatio="xMidYMid meet"
   role="img"
@@ -50,7 +59,7 @@
       width={WHITE_W - 1}
       height={WHITE_H - 1}
       rx="3"
-      fill={hi.has(k.n) ? color : '#ffffff'}
+      fill={hi.has(k.n) ? colorFor(k.n) : '#ffffff'}
       stroke="#c2c9d4"
       stroke-width="1" />
     {#if hi.has(k.n)}
@@ -66,7 +75,7 @@
       width={BLACK_W}
       height={BLACK_H}
       rx="2.5"
-      fill={hi.has(k.n) ? color : '#2a2f3a'}
+      fill={hi.has(k.n) ? colorFor(k.n) : '#2a2f3a'}
       stroke="#1a1d24"
       stroke-width="1" />
   {/each}
@@ -79,7 +88,6 @@
     overflow-y: hidden;
   }
   .kbd {
-    height: 100px;
     width: auto;
     display: block;
     margin: 0 auto;

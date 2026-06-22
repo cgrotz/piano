@@ -16,8 +16,12 @@ export interface GradedStep {
 }
 
 export interface ExtractOptions {
-  /** 0-based staff to grade. Default 0 = top staff (right hand). */
-  staffIndex?: number;
+  /**
+   * Which staff to grade. A 0-based index grades one staff (0 = top = right
+   * hand); `'all'` merges every staff at each container into one step (both
+   * hands together). Default 0.
+   */
+  staffIndex?: number | 'all';
 }
 
 /**
@@ -36,18 +40,21 @@ export function osmdHalfToneToMidi(halfTone: number): number {
  * Walk OSMD's parsed model into an ordered list of graded steps (component 7).
  *
  * Decisions (per DESIGN.md / ARCHITECTURE.md):
- * - Single tracked staff (default top); other staves are ignored.
- * - First voice of that staff only.
- * - Notes struck together (a chord) collapse into one step.
+ * - One tracked staff (default top), or `'all'` to merge both hands together.
+ * - First voice of each tracked staff only.
+ * - Notes struck together (a chord, or both hands at one timestamp) collapse
+ *   into one step.
  * - Tied continuations are skipped: a tied note sounds once at its onset and is
- *   held, so it must not become a second step.
+ *   held, so it must not become a second step. (This is what makes both-hands
+ *   work across differing rhythms — a held note in one hand never re-triggers
+ *   while the other hand moves.)
  * - Rests are skipped.
  */
 export function extractSteps(
   osmd: OpenSheetMusicDisplay,
   options: ExtractOptions = {}
 ): GradedStep[] {
-  const staffIndex = options.staffIndex ?? 0;
+  const staffSel = options.staffIndex ?? 0;
   const steps: GradedStep[] = [];
 
   // Global container ordinal, incremented for every container so it matches the
@@ -60,21 +67,28 @@ export function extractSteps(
       const here = cursorIndex;
       cursorIndex++;
 
-      const staffEntry = container.StaffEntries[staffIndex];
-      if (!staffEntry) continue;
-
-      const voiceEntry = staffEntry.VoiceEntries[0];
-      if (!voiceEntry) continue;
+      // One staff, or every staff present at this timestamp (both hands).
+      const staffEntries =
+        staffSel === 'all'
+          ? container.StaffEntries.filter((e) => e)
+          : container.StaffEntries[staffSel]
+            ? [container.StaffEntries[staffSel]]
+            : [];
 
       const pitches: number[] = [];
-      for (const note of voiceEntry.Notes) {
-        if (note.isRest() || !note.Pitch) continue;
+      for (const staffEntry of staffEntries) {
+        const voiceEntry = staffEntry.VoiceEntries[0];
+        if (!voiceEntry) continue;
 
-        // Tied continuation: same Tie, but not the note that started it.
-        const tie = note.NoteTie;
-        if (tie && tie.StartNote !== note) continue;
+        for (const note of voiceEntry.Notes) {
+          if (note.isRest() || !note.Pitch) continue;
 
-        pitches.push(osmdHalfToneToMidi(note.halfTone));
+          // Tied continuation: same Tie, but not the note that started it.
+          const tie = note.NoteTie;
+          if (tie && tie.StartNote !== note) continue;
+
+          pitches.push(osmdHalfToneToMidi(note.halfTone));
+        }
       }
 
       if (pitches.length > 0) {

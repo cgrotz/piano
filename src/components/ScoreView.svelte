@@ -5,7 +5,6 @@
   import { GradingEngine, type GradingStatus } from '../lib/engine/grading';
   import type { MidiController } from '../lib/midi/midi.svelte';
   import type { MidiNoteEvent } from '../lib/midi/types';
-  import { pitchName } from '../lib/midi/types';
   import ConnBadge from './ConnBadge.svelte';
   import PianoKeyboard from './PianoKeyboard.svelte';
 
@@ -21,26 +20,42 @@
 
   const engine = new GradingEngine();
 
+  type StaffSel = number | 'all';
+  type ViewMode = 'both' | 'notes' | 'piano';
+
   let container: HTMLDivElement;
   let renderer: ScoreRenderer | undefined;
   let steps: GradedStep[] = [];
   let loaded = $state(false);
   let error = $state<string | null>(null);
   let staffCount = $state(1);
-  let staffIndex = $state(0);
+  let staffSel = $state<StaffSel>(0);
+  let viewMode = $state<ViewMode>('both');
+
+  // For both-hands coloring: which MIDI pitches belong to the left hand, keyed by
+  // the step's cursorIndex. Empty unless grading both staves.
+  let leftByIndex = new Map<number, Set<number>>();
 
   let status = $state<GradingStatus>('empty');
-  let index = $state(0);
   let total = $state(0);
   let errors = $state(0);
   let expected = $state<number[]>([]);
+  let curCursorIndex = $state(-1);
   let keyLow = $state(60);
   let keyHigh = $state(72);
 
-  const progress = $derived(total === 0 ? 0 : Math.round((index / total) * 100));
   const accuracy = $derived(total + errors === 0 ? 100 : Math.round((total / (total + errors)) * 100));
-  const handColor = $derived(staffIndex === 0 ? RIGHT_COLOR : LEFT_COLOR);
-  const handName = $derived(staffCount > 1 ? (staffIndex === 0 ? 'Right hand' : 'Left hand') : '');
+  const bothHands = $derived(staffSel === 'all');
+  const handColor = $derived(staffSel === 1 ? LEFT_COLOR : RIGHT_COLOR);
+  const handName = $derived(
+    staffCount < 2 ? '' : staffSel === 'all' ? 'Both hands' : staffSel === 1 ? 'Left hand' : 'Right hand'
+  );
+
+  /** Color for a highlighted key: per-hand in both-hands mode, else the single hand color. */
+  function keyColor(n: number): string {
+    if (!bothHands) return handColor;
+    return leftByIndex.get(curCursorIndex)?.has(n) ? LEFT_COLOR : RIGHT_COLOR;
+  }
 
   let unsubscribe: (() => void) | undefined;
   let wakeLock: WakeLockSentinel | null = null;
@@ -81,10 +96,10 @@
 
   function sync() {
     status = engine.status;
-    index = engine.index;
     total = engine.total;
     errors = engine.errorCount;
     expected = engine.currentPitches;
+    curCursorIndex = steps[engine.index]?.cursorIndex ?? -1;
   }
 
   /** Whole-octave (C..C) range covering all step pitches, for the keyboard. */
@@ -101,7 +116,14 @@
     // Connect on demand: pressing Start is a user gesture, so the MIDI prompt works here.
     if (midi.status !== 'connected') await midi.connect();
 
-    steps = renderer.extractSteps({ staffIndex });
+    steps = renderer.extractSteps({ staffIndex: staffSel });
+    // For both-hands coloring, learn which pitches are left hand at each container.
+    leftByIndex = new Map();
+    if (staffSel === 'all' && staffCount > 1) {
+      for (const s of renderer.extractSteps({ staffIndex: 1 })) {
+        leftByIndex.set(s.cursorIndex, new Set(s.pitches));
+      }
+    }
     computeRange(steps.flatMap((s) => s.pitches));
     engine.load(steps);
     renderer.reset();
@@ -122,9 +144,9 @@
     sync();
   }
 
-  function selectStaff(i: number) {
-    if (i === staffIndex) return;
-    staffIndex = i;
+  function selectStaff(sel: StaffSel) {
+    if (sel === staffSel) return;
+    staffSel = sel;
     if (status === 'playing' || status === 'completed') startPractice();
   }
 
@@ -161,23 +183,37 @@
     <div class="controls">
       <ConnBadge {midi} />
       {#if staffCount > 1}
-        <div class="staffpick" role="group" aria-label="Staff selection">
+        <div class="staffpick" role="group" aria-label="Hand selection">
           {#if staffCount === 2}
-            <button class="seg" class:active={staffIndex === 1} onclick={() => selectStaff(1)} aria-pressed={staffIndex === 1}>
-              Left hand
+            <button class="seg" class:active={staffSel === 0} onclick={() => selectStaff(0)} aria-pressed={staffSel === 0}>
+              Right
             </button>
-            <button class="seg" class:active={staffIndex === 0} onclick={() => selectStaff(0)} aria-pressed={staffIndex === 0}>
-              Right hand
+            <button class="seg" class:active={staffSel === 1} onclick={() => selectStaff(1)} aria-pressed={staffSel === 1}>
+              Left
+            </button>
+            <button class="seg" class:active={staffSel === 'all'} onclick={() => selectStaff('all')} aria-pressed={staffSel === 'all'}>
+              Both
             </button>
           {:else}
             {#each Array(staffCount) as _, i (i)}
-              <button class="seg" class:active={i === staffIndex} onclick={() => selectStaff(i)} aria-pressed={i === staffIndex}>
+              <button class="seg" class:active={i === staffSel} onclick={() => selectStaff(i)} aria-pressed={i === staffSel}>
                 Staff {i + 1}
               </button>
             {/each}
           {/if}
         </div>
       {/if}
+      <div class="staffpick" role="group" aria-label="View mode">
+        <button class="seg" class:active={viewMode === 'both'} onclick={() => (viewMode = 'both')} aria-pressed={viewMode === 'both'}>
+          Piano + Notes
+        </button>
+        <button class="seg" class:active={viewMode === 'notes'} onclick={() => (viewMode = 'notes')} aria-pressed={viewMode === 'notes'}>
+          Notes
+        </button>
+        <button class="seg" class:active={viewMode === 'piano'} onclick={() => (viewMode = 'piano')} aria-pressed={viewMode === 'piano'}>
+          Piano
+        </button>
+      </div>
       {#if status === 'playing'}
         <button class="ghost" onclick={restart} aria-label="Restart practice">↻ Restart</button>
       {:else}
@@ -190,12 +226,22 @@
     <p class="error" role="alert">Failed: {error}</p>
   {/if}
 
-  <div class="keyboard">
-    {#if handName}
-      <span class="hand" style="color:{handColor}">{handName}</span>
-    {/if}
-    <PianoKeyboard low={keyLow} high={keyHigh} highlight={status === 'playing' ? expected : []} color={handColor} />
-  </div>
+  {#if viewMode !== 'notes'}
+    <div class="keyboard">
+      {#if bothHands}
+        <span class="hand"><span class="dot" style="background:{RIGHT_COLOR}"></span>Right</span>
+        <span class="hand"><span class="dot" style="background:{LEFT_COLOR}"></span>Left</span>
+      {:else if handName}
+        <span class="hand"><span class="dot" style="background:{handColor}"></span>{handName}</span>
+      {/if}
+      <PianoKeyboard
+        low={keyLow}
+        high={keyHigh}
+        highlight={status === 'playing' ? expected : []}
+        colorFor={keyColor}
+        height={viewMode === 'piano' ? 220 : 100} />
+    </div>
+  {/if}
 
   {#if status === 'completed'}
     <div class="done" role="status" aria-label="Practice complete">
@@ -213,7 +259,8 @@
     </div>
   {/if}
 
-  <div class="sheet" bind:this={container} aria-label="Sheet music notation"></div>
+  <!-- Kept in the DOM (only CSS-hidden) so OSMD's rendered SVG survives mode switches. -->
+  <div class="sheet" class:hidden={viewMode === 'piano'} bind:this={container} aria-label="Sheet music notation"></div>
 </section>
 
 <style>
@@ -288,10 +335,18 @@
     margin-bottom: 0.9rem;
   }
   .hand {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
     font-size: 0.78rem;
     font-weight: 700;
-    margin-bottom: 0.35rem;
+    color: var(--muted);
+    margin: 0 0.7rem 0.35rem 0;
+  }
+  .hand .dot {
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
   }
 
   /* Completion */
@@ -350,6 +405,9 @@
     scroll-behavior: smooth;
     flex: 1;
     min-height: 0;
+  }
+  .sheet.hidden {
+    display: none;
   }
   .error {
     color: var(--error);
