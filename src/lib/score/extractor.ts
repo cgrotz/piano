@@ -1,3 +1,4 @@
+import { ChordSymbolContainer } from 'opensheetmusicdisplay';
 import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 
 /** One graded position: the set of MIDI pitches that must all be played to advance. */
@@ -13,6 +14,10 @@ export interface GradedStep {
    * skipping rests, tied continuations, and other-staff-only positions.
    */
   cursorIndex: number;
+  /** Active chord name at this step, if any. */
+  chordName?: string;
+  /** Active chord MIDI pitches at this step, if any. */
+  chordPitches?: number[];
 }
 
 export interface ExtractOptions {
@@ -34,6 +39,92 @@ export interface ExtractOptions {
  */
 export function osmdHalfToneToMidi(halfTone: number): number {
   return halfTone + 12;
+}
+
+/**
+ * Convert an OSMD ChordSymbolContainer into absolute MIDI notes.
+ * Places the chord in octave 3, and a slash bass note (if present) in octave 2.
+ */
+export function getChordPitches(chord: ChordSymbolContainer): number[] {
+  if (!chord || !chord.RootPitch) return [];
+
+  // 1. Get root pitch class (0-11)
+  const rootHalfTone = chord.RootPitch.getHalfTone();
+  const rootPc = ((rootHalfTone + 12) % 12);
+
+  // 2. Map ChordSymbolEnum to semitone offsets
+  // 0: major, 1: minor, 2: augmented, 3: diminished, 4: dominant, 
+  // 5: majorseventh, 6: minorseventh, 7: diminishedseventh, 8: augmentedseventh, 9: halfdiminished
+  // 22: suspendedsecond, 23: suspendedfourth, 29: power
+  let offsets = [0, 4, 7]; // major default
+  const kind = chord.ChordKind;
+  switch (kind) {
+    case 1: // minor
+      offsets = [0, 3, 7];
+      break;
+    case 2: // augmented
+      offsets = [0, 4, 8];
+      break;
+    case 3: // diminished
+      offsets = [0, 3, 6];
+      break;
+    case 4: // dominant
+      offsets = [0, 4, 7, 10];
+      break;
+    case 5: // majorseventh
+      offsets = [0, 4, 7, 11];
+      break;
+    case 6: // minorseventh
+      offsets = [0, 3, 7, 10];
+      break;
+    case 7: // diminishedseventh
+      offsets = [0, 3, 6, 9];
+      break;
+    case 8: // augmentedseventh
+      offsets = [0, 4, 8, 10];
+      break;
+    case 9: // halfdiminished
+      offsets = [0, 3, 6, 10];
+      break;
+    case 11: // majorsixth
+      offsets = [0, 4, 7, 9];
+      break;
+    case 12: // minorsixth
+      offsets = [0, 3, 7, 9];
+      break;
+    case 13: // dominantninth
+      offsets = [0, 4, 7, 10, 14];
+      break;
+    case 14: // majorninth
+      offsets = [0, 4, 7, 11, 14];
+      break;
+    case 15: // minorninth
+      offsets = [0, 3, 7, 10, 14];
+      break;
+    case 22: // suspendedsecond
+      offsets = [0, 2, 7];
+      break;
+    case 23: // suspendedfourth
+      offsets = [0, 5, 7];
+      break;
+    case 29: // power
+      offsets = [0, 7];
+      break;
+  }
+
+  // 3. Construct chord notes in octave 3 (base note C3 = 48)
+  const rootMidi = 48 + rootPc;
+  const pitches = offsets.map((offset) => rootMidi + offset);
+
+  // 4. Handle slash chord bass note if present (place it in octave 2, base C2 = 36)
+  if (chord.BassPitch) {
+    const bassHalfTone = chord.BassPitch.getHalfTone();
+    const bassPc = ((bassHalfTone + 12) % 12);
+    const bassMidi = 36 + bassPc;
+    pitches.unshift(bassMidi);
+  }
+
+  return [...new Set(pitches)].sort((a, b) => a - b);
 }
 
 /**
@@ -61,11 +152,34 @@ export function extractSteps(
   // cursor's stop sequence (1:1, in document order) regardless of which staff is tracked.
   let cursorIndex = 0;
 
+  // Track currently active chord name and pitches to propagate them forward.
+  let activeChordName: string | undefined = undefined;
+  let activeChordPitches: number[] | undefined = undefined;
+
   for (const measure of osmd.Sheet.SourceMeasures) {
+    const keyInstruction = measure.getKeyInstruction(0);
+
     // Containers are the vertical time-slices within a measure, in order.
     for (const container of measure.VerticalSourceStaffEntryContainers) {
       const here = cursorIndex;
       cursorIndex++;
+
+      // Check if this container contains a new chord symbol (harmony)
+      for (const entry of container.StaffEntries) {
+        if (entry && entry.ChordContainers && entry.ChordContainers.length > 0) {
+          const chord = entry.ChordContainers[0];
+          try {
+            activeChordName = ChordSymbolContainer.calculateChordText(chord, 0, keyInstruction);
+          } catch {
+            const rootShort = chord.RootPitch?.ToStringShort() || '';
+            const rootName = rootShort.replace(/[0-9]/g, '');
+            const kindText = chord.ChordKind === 1 ? 'm' : '';
+            activeChordName = `${rootName}${kindText}`;
+          }
+          activeChordPitches = getChordPitches(chord);
+          break; // Use the first chord symbol found at this timestamp
+        }
+      }
 
       // One staff, or every staff present at this timestamp (both hands).
       const staffEntries =
@@ -95,7 +209,9 @@ export function extractSteps(
         steps.push({
           pitches: [...new Set(pitches)].sort((a, b) => a - b),
           measure: measure.MeasureNumber,
-          cursorIndex: here
+          cursorIndex: here,
+          chordName: activeChordName,
+          chordPitches: activeChordPitches
         });
       }
     }

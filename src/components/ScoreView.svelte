@@ -44,6 +44,8 @@
   let curCursorIndex = $state(-1);
   let keyLow = $state(60);
   let keyHigh = $state(72);
+  let currentChordName = $state<string | null>(null);
+  let currentChordPitches = $state<number[]>([]);
 
   const accuracy = $derived(total + errors === 0 ? 100 : Math.round((total / (total + errors)) * 100));
   const bothHands = $derived(staffSel === 'all');
@@ -65,8 +67,18 @@
   const litKeys = $derived.by(() => {
     const m = new Map<number, string>();
     if (status !== 'playing') return m;
-    for (const p of expected) m.set(p, keyColor(p)); // target cue
-    for (const p of midi.heldNotes) m.set(p, expected.includes(p) ? keyColor(p) : WRONG_COLOR);
+    // 1. Highlight left-hand chord guide notes in a dim soft orange/yellow color
+    for (const p of currentChordPitches) {
+      m.set(p, 'rgba(245, 158, 11, 0.35)');
+    }
+    // 2. Target melody cues (overwriting overlapping chord keys)
+    for (const p of expected) {
+      m.set(p, keyColor(p));
+    }
+    // 3. Held keys
+    for (const p of midi.heldNotes) {
+      m.set(p, expected.includes(p) ? keyColor(p) : WRONG_COLOR);
+    }
     return m;
   });
 
@@ -112,7 +124,10 @@
     total = engine.total;
     errors = engine.errorCount;
     expected = engine.currentPitches;
-    curCursorIndex = steps[engine.index]?.cursorIndex ?? -1;
+    const currentStep = steps[engine.index];
+    curCursorIndex = currentStep?.cursorIndex ?? -1;
+    currentChordName = currentStep?.chordName ?? null;
+    currentChordPitches = currentStep?.chordPitches ?? [];
   }
 
   const BLACK_CLASSES = new Set([1, 3, 6, 8, 10]);
@@ -146,7 +161,10 @@
         leftByIndex.set(s.cursorIndex, new Set(s.pitches));
       }
     }
-    computeRange(steps.flatMap((s) => s.pitches));
+    computeRange([
+      ...steps.flatMap((s) => s.pitches),
+      ...steps.flatMap((s) => s.chordPitches || [])
+    ]);
     engine.load(steps);
     renderer.reset();
     renderer.clearHighlight();
@@ -250,12 +268,19 @@
 
   {#if viewMode !== 'notes'}
     <div class="keyboard">
-      {#if bothHands}
-        <span class="hand"><span class="dot" style="background:{RIGHT_COLOR}"></span>Right</span>
-        <span class="hand"><span class="dot" style="background:{LEFT_COLOR}"></span>Left</span>
-      {:else if handName}
-        <span class="hand"><span class="dot" style="background:{handColor}"></span>{handName}</span>
-      {/if}
+      <div class="keyboard-header">
+        <div class="hands">
+          {#if bothHands}
+            <span class="hand"><span class="dot" style="background:{RIGHT_COLOR}"></span>Right</span>
+            <span class="hand"><span class="dot" style="background:{LEFT_COLOR}"></span>Left</span>
+          {:else if handName}
+            <span class="hand"><span class="dot" style="background:{handColor}"></span>{handName}</span>
+          {/if}
+        </div>
+        {#if currentChordName}
+          <span class="chord-badge" aria-live="polite">Left Hand Chord: {currentChordName}</span>
+        {/if}
+      </div>
       <PianoKeyboard
         low={keyLow}
         high={keyHigh}
@@ -355,6 +380,22 @@
   .keyboard {
     margin-bottom: 0.9rem;
   }
+  .keyboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.4rem;
+    min-height: 1.5rem;
+  }
+  .chord-badge {
+    background: var(--accent-soft);
+    border: 1px solid rgba(79, 70, 229, 0.2);
+    border-radius: var(--radius-sm);
+    padding: 0.2rem 0.5rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--accent);
+  }
   .hand {
     display: inline-flex;
     align-items: center;
@@ -362,7 +403,6 @@
     font-size: 0.78rem;
     font-weight: 700;
     color: var(--muted);
-    margin: 0 0.7rem 0.35rem 0;
   }
   .hand .dot {
     width: 0.6rem;
