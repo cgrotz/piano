@@ -5,12 +5,15 @@
     low,
     high,
     keyColors,
+    holdKeys = new Set<number>(),
     height = 120
   }: {
     low: number;
     high: number;
     /** Pitch -> fill color for every lit key. Absent keys render unlit. */
     keyColors: Map<number, string>;
+    /** Lit keys that should read as "keep holding" — drawn with a ring. */
+    holdKeys?: Set<number>;
     height?: number;
   } = $props();
 
@@ -55,7 +58,7 @@
   aria-label="piano keys to play">
   <div class="whites">
     {#each layout.whites as n (n)}
-      <div class="wk" class:on={keyColors.has(n)} style={keyColors.has(n) ? `background:${keyColors.get(n)}` : ''}>
+      <div class="wk" class:on={keyColors.has(n)} class:hold={holdKeys.has(n)} style={keyColors.has(n) ? `background:${keyColors.get(n)}` : ''}>
         {#if keyColors.has(n)}<span class="lbl">{pitchName(n)}</span>{/if}
       </div>
     {/each}
@@ -65,6 +68,7 @@
       <div
         class="bk"
         class:on={keyColors.has(b.n)}
+        class:hold={holdKeys.has(b.n)}
         style="left:{blackLeftPct(b.after)}%; width:{blackWidthPct}%; {keyColors.has(b.n)
           ? `background:${keyColors.get(b.n)}`
           : ''}">
@@ -97,6 +101,14 @@
   }
   .wk:not(:first-child) {
     border-left: none;
+  }
+  /* "Keep holding" cue: an inset ring over the dimmed fill, so a held note reads
+     as hold-this rather than press-now. */
+  .wk.hold {
+    box-shadow: inset 0 0 0 2px rgba(30, 35, 50, 0.4);
+  }
+  .bk.hold {
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.6);
   }
   .blacks {
     position: absolute;

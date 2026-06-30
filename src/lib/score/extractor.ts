@@ -5,6 +5,19 @@ import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 export interface GradedStep {
   /** Expected MIDI pitches, de-duplicated and ascending. One entry = a chord. */
   pitches: number[];
+  /**
+   * Pitches struck at an earlier step whose written duration still spans this
+   * one — i.e. notes that should remain physically held here (a "keep holding"
+   * cue). De-duplicated and ascending; never overlaps `pitches`. Empty when
+   * nothing carries over. The grading engine ignores this; it drives display.
+   */
+  sustained?: number[];
+  /**
+   * Left-hand subset of this step's sounding pitches (onset or sustained), only
+   * populated when merging both staves (`staffIndex: 'all'`). Lets the keyboard
+   * colour held left-hand notes correctly once their onset has scrolled past.
+   */
+  leftPitches?: number[];
   /** 1-based measure number, for labels/debugging. */
   measure: number;
   /**
@@ -148,6 +161,15 @@ export function extractSteps(
   const staffSel = options.staffIndex ?? 0;
   const steps: GradedStep[] = [];
 
+  // Staff index treated as the left hand for both-hands colouring (top staff = 0).
+  const LEFT_STAFF = 1;
+
+  // Every tracked note as an absolute [onset, end) interval, used after the walk
+  // to work out which pitches are still sounding (held) at each step's onset.
+  const intervals: { onset: number; end: number; pitch: number; staff: number }[] = [];
+  // Absolute onset time of each pushed step, parallel to `steps`.
+  const stepTimes: number[] = [];
+
   // Global container ordinal, incremented for every container so it matches the
   // cursor's stop sequence (1:1, in document order) regardless of which staff is tracked.
   let cursorIndex = 0;
@@ -181,40 +203,73 @@ export function extractSteps(
         }
       }
 
-      // One staff, or every staff present at this timestamp (both hands).
-      const staffEntries =
-        staffSel === 'all'
-          ? container.StaffEntries.filter((e) => e)
-          : container.StaffEntries[staffSel]
-            ? [container.StaffEntries[staffSel]]
-            : [];
+      // One staff, or every staff present at this timestamp (both hands). Keep
+      // the staff index alongside the entry so held notes can be hand-coloured.
+      const tracked: { entry: (typeof container.StaffEntries)[number]; staff: number }[] = [];
+      if (staffSel === 'all') {
+        container.StaffEntries.forEach((entry, staff) => {
+          if (entry) tracked.push({ entry, staff });
+        });
+      } else if (container.StaffEntries[staffSel]) {
+        tracked.push({ entry: container.StaffEntries[staffSel], staff: staffSel });
+      }
 
+      const onset = container.getAbsoluteTimestamp().RealValue;
       const pitches: number[] = [];
-      for (const staffEntry of staffEntries) {
-        const voiceEntry = staffEntry.VoiceEntries[0];
+      const leftOnsets: number[] = [];
+      for (const { entry, staff } of tracked) {
+        const voiceEntry = entry.VoiceEntries[0];
         if (!voiceEntry) continue;
 
         for (const note of voiceEntry.Notes) {
           if (note.isRest() || !note.Pitch) continue;
 
+          const pitch = osmdHalfToneToMidi(note.halfTone);
+          // Record the sounding span (including tied continuations) so the
+          // sustained-pitch pass below sees full coverage of held notes.
+          intervals.push({ onset, end: onset + note.Length.RealValue, pitch, staff });
+
           // Tied continuation: same Tie, but not the note that started it.
           const tie = note.NoteTie;
           if (tie && tie.StartNote !== note) continue;
 
-          pitches.push(osmdHalfToneToMidi(note.halfTone));
+          pitches.push(pitch);
+          if (staff === LEFT_STAFF) leftOnsets.push(pitch);
         }
       }
 
       if (pitches.length > 0) {
         steps.push({
           pitches: [...new Set(pitches)].sort((a, b) => a - b),
+          leftPitches: [...new Set(leftOnsets)].sort((a, b) => a - b),
           measure: measure.MeasureNumber,
           cursorIndex: here,
           chordName: activeChordName,
           chordPitches: activeChordPitches
         });
+        stepTimes.push(onset);
       }
     }
+  }
+
+  // Second pass: for each step, find pitches whose interval started earlier and
+  // has not yet ended (strictly), i.e. notes still being held at this onset.
+  const EPS = 1e-9;
+  for (let i = 0; i < steps.length; i++) {
+    const t = stepTimes[i];
+    const onsetSet = new Set(steps[i].pitches);
+    const held = new Set<number>();
+    const heldLeft = new Set<number>();
+    for (const iv of intervals) {
+      if (iv.onset < t - EPS && iv.end > t + EPS && !onsetSet.has(iv.pitch)) {
+        held.add(iv.pitch);
+        if (iv.staff === LEFT_STAFF) heldLeft.add(iv.pitch);
+      }
+    }
+    steps[i].sustained = [...held].sort((a, b) => a - b);
+    steps[i].leftPitches = [...new Set([...(steps[i].leftPitches ?? []), ...heldLeft])].sort(
+      (a, b) => a - b
+    );
   }
 
   return steps;

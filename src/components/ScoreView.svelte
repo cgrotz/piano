@@ -18,6 +18,9 @@
   const RIGHT_COLOR = '#4f46e5';
   const LEFT_COLOR = '#f59e0b';
   const WRONG_COLOR = '#e5544b'; // matches the sheet's wrong-note flash
+  // Dimmed hand colours for "keep holding" notes — struck earlier, still sounding.
+  const HOLD_RIGHT = 'rgba(79, 70, 229, 0.4)';
+  const HOLD_LEFT = 'rgba(245, 158, 11, 0.45)';
 
   const engine = new GradingEngine();
 
@@ -33,19 +36,21 @@
   let staffSel = $state<StaffSel>(0);
   let viewMode = $state<ViewMode>('both');
 
-  // For both-hands coloring: which MIDI pitches belong to the left hand, keyed by
-  // the step's cursorIndex. Empty unless grading both staves.
-  let leftByIndex = new Map<number, Set<number>>();
-
   let status = $state<GradingStatus>('empty');
   let total = $state(0);
   let errors = $state(0);
   let expected = $state<number[]>([]);
-  let curCursorIndex = $state(-1);
+  let sustained = $state<number[]>([]);
+  // Left-hand pitches sounding at the current step (onset or held); both-hands only.
+  let leftPitches = $state<number[]>([]);
   let keyLow = $state(60);
   let keyHigh = $state(72);
   let currentChordName = $state<string | null>(null);
   let currentChordPitches = $state<number[]>([]);
+  // Pitches currently held that were judged a wrong press — the only held keys
+  // that should glow red. A correct key you're still holding after the step
+  // advanced (e.g. a long note held under faster notes) must not turn red.
+  let wrongHeld = $state<Set<number>>(new Set());
 
   const accuracy = $derived(total + errors === 0 ? 100 : Math.round((total / (total + errors)) * 100));
   const bothHands = $derived(staffSel === 'all');
@@ -54,10 +59,19 @@
     staffCount < 2 ? '' : staffSel === 'all' ? 'Both hands' : staffSel === 1 ? 'Left hand' : 'Right hand'
   );
 
-  /** Color for a highlighted key: per-hand in both-hands mode, else the single hand color. */
+  /** Whether pitch n belongs to the left hand at the current step. */
+  function isLeft(n: number): boolean {
+    return bothHands ? leftPitches.includes(n) : staffSel === 1;
+  }
+
+  /** Solid "press now" colour for a target key. */
   function keyColor(n: number): string {
-    if (!bothHands) return handColor;
-    return leftByIndex.get(curCursorIndex)?.has(n) ? LEFT_COLOR : RIGHT_COLOR;
+    return isLeft(n) ? LEFT_COLOR : RIGHT_COLOR;
+  }
+
+  /** Dimmed "keep holding" colour for a sustained key. */
+  function holdColor(n: number): string {
+    return isLeft(n) ? HOLD_LEFT : HOLD_RIGHT;
   }
 
   /**
@@ -67,20 +81,32 @@
   const litKeys = $derived.by(() => {
     const m = new Map<number, string>();
     if (status !== 'playing') return m;
-    // 1. Highlight left-hand chord guide notes in a dim soft orange/yellow color
+    // 1. Left-hand chord guide notes in a dim soft orange/yellow.
     for (const p of currentChordPitches) {
       m.set(p, 'rgba(245, 158, 11, 0.35)');
     }
-    // 2. Target melody cues (overwriting overlapping chord keys)
+    // 2. Keep-holding cues: notes struck earlier that should still be down. Dim
+    //    hand colour, reinforced by a ring (see holdKeys) so they read as "hold",
+    //    not "press". A note here is never also a current onset.
+    for (const p of sustained) {
+      m.set(p, holdColor(p));
+    }
+    // 3. Target melody cues — the keys to press now (overwriting chord keys).
     for (const p of expected) {
       m.set(p, keyColor(p));
     }
-    // 3. Held keys
+    // 4. Held keys: hand color while they're a current target, red only if they
+    //    were an actual wrong press. A correct key you're still holding after the
+    //    step advanced keeps its keep-holding colour (or stays unlit), not red.
     for (const p of midi.heldNotes) {
-      m.set(p, expected.includes(p) ? keyColor(p) : WRONG_COLOR);
+      if (expected.includes(p)) m.set(p, keyColor(p));
+      else if (wrongHeld.has(p)) m.set(p, WRONG_COLOR);
     }
     return m;
   });
+
+  /** Sustained keys get a ring to distinguish "keep holding" from "press now". */
+  const holdKeys = $derived(status === 'playing' ? new Set(sustained) : new Set<number>());
 
   let unsubscribe: (() => void) | undefined;
   let wakeLock: WakeLockSentinel | null = null;
@@ -125,7 +151,8 @@
     errors = engine.errorCount;
     expected = engine.currentPitches;
     const currentStep = steps[engine.index];
-    curCursorIndex = currentStep?.cursorIndex ?? -1;
+    sustained = currentStep?.sustained ?? [];
+    leftPitches = currentStep?.leftPitches ?? [];
     currentChordName = currentStep?.chordName ?? null;
     currentChordPitches = currentStep?.chordPitches ?? [];
   }
@@ -154,18 +181,12 @@
     if (midi.status !== 'connected') await midi.connect();
 
     steps = renderer.extractSteps({ staffIndex: staffSel });
-    // For both-hands coloring, learn which pitches are left hand at each container.
-    leftByIndex = new Map();
-    if (staffSel === 'all' && staffCount > 1) {
-      for (const s of renderer.extractSteps({ staffIndex: 1 })) {
-        leftByIndex.set(s.cursorIndex, new Set(s.pitches));
-      }
-    }
     computeRange([
       ...steps.flatMap((s) => s.pitches),
       ...steps.flatMap((s) => s.chordPitches || [])
     ]);
     engine.load(steps);
+    wrongHeld = new Set();
     renderer.reset();
     renderer.clearHighlight();
     if (steps.length > 0) renderer.moveToIndex(steps[0].cursorIndex);
@@ -178,6 +199,7 @@
   function restart() {
     if (!renderer) return;
     engine.reset();
+    wrongHeld = new Set();
     renderer.reset();
     renderer.clearHighlight();
     if (steps.length > 0) renderer.moveToIndex(steps[0].cursorIndex);
@@ -191,9 +213,19 @@
   }
 
   function onNote(event: MidiNoteEvent) {
-    if (event.type !== 'noteOn' || !renderer) return;
+    if (!renderer) return;
+    if (event.type !== 'noteOn') {
+      // Releasing a key clears its wrong-press state so it stops glowing red.
+      if (wrongHeld.has(event.pitch)) {
+        wrongHeld.delete(event.pitch);
+        wrongHeld = new Set(wrongHeld);
+      }
+      return;
+    }
     switch (engine.pressNote(event.pitch)) {
       case 'wrong':
+        wrongHeld.add(event.pitch);
+        wrongHeld = new Set(wrongHeld);
         renderer.highlightWrong();
         break;
       case 'progress':
@@ -285,6 +317,7 @@
         low={keyLow}
         high={keyHigh}
         keyColors={litKeys}
+        {holdKeys}
         height={viewMode === 'piano' ? 220 : 100} />
     </div>
   {/if}

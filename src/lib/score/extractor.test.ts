@@ -77,4 +77,33 @@ describe('extractSteps — two staves', () => {
     const osmd = await load(TWO_STAFF_XML);
     expect(extractSteps(osmd, { staffIndex: 'all' }).map((s) => s.cursorIndex)).toEqual([0, 1, 2, 3]);
   });
+
+  it('marks held notes as sustained at the steps they span', async () => {
+    const osmd = await load(TWO_STAFF_XML);
+    // C3 (half) is struck on beat 1 and still sounds on beat 2; G3 (half) is
+    // struck on beat 3 and still sounds on beat 4. Onset steps never re-list them.
+    expect(extractSteps(osmd, { staffIndex: 'all' }).map((s) => s.sustained)).toEqual([
+      [], // beat 1: nothing carried over
+      [48], // beat 2: C3 held under D5
+      [], // beat 3: G3 freshly struck (an onset, not sustained)
+      [55] // beat 4: G3 held under F5
+    ]);
+  });
+
+  it('attributes held left-hand notes to the left hand for colouring', async () => {
+    const osmd = await load(TWO_STAFF_XML);
+    // leftPitches = left-hand onsets ∪ left-hand sustained at each step.
+    expect(extractSteps(osmd, { staffIndex: 'all' }).map((s) => s.leftPitches)).toEqual([
+      [48], // C3 onset
+      [48], // C3 still held (onset has scrolled past)
+      [55], // G3 onset
+      [55] // G3 still held
+    ]);
+  });
+
+  it('reports no sustained notes when grading a single staff of equal rhythm', async () => {
+    const osmd = await load(TWO_STAFF_XML);
+    // The right hand is four separate quarters — nothing is ever held over.
+    expect(extractSteps(osmd, { staffIndex: 0 }).map((s) => s.sustained)).toEqual([[], [], [], []]);
+  });
 });
