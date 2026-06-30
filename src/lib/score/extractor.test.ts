@@ -107,3 +107,60 @@ describe('extractSteps — two staves', () => {
     expect(extractSteps(osmd, { staffIndex: 0 }).map((s) => s.sustained)).toEqual([[], [], [], []]);
   });
 });
+
+/**
+ * Two whole-note measures (C4, then D4) with a backward repeat at the end of
+ * measure 2. The cursor plays them as 1,2,1,2 — so the extracted steps must too,
+ * or the keyboard/grading falls out of sync with the visual cursor on the loop.
+ */
+const REPEAT_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0">
+  <part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions>
+        <clef><sign>G</sign><line>2</line></clef>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+      </attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+    </measure>
+    <measure number="2">
+      <note><pitch><step>D</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+      <barline location="right">
+        <bar-style>light-heavy</bar-style>
+        <repeat direction="backward"/>
+      </barline>
+    </measure>
+  </part>
+</score-partwise>`;
+
+describe('extractSteps — repeats', () => {
+  async function load(xml: string) {
+    const div = document.createElement('div');
+    const osmd = new OpenSheetMusicDisplay(div);
+    await osmd.load(xml);
+    return osmd;
+  }
+
+  it('replays a repeated section in playback order (1,2,1,2)', async () => {
+    const osmd = await load(REPEAT_XML);
+    const steps = extractSteps(osmd, { staffIndex: 0 });
+    // C4, D4, then the backward repeat plays C4, D4 again.
+    expect(steps.map((s) => s.pitches)).toEqual([[60], [62], [60], [62]]);
+    expect(steps.map((s) => s.measure)).toEqual([1, 2, 1, 2]);
+  });
+
+  it('assigns strictly increasing cursorIndex across the repeat seam', async () => {
+    const osmd = await load(REPEAT_XML);
+    const idx = extractSteps(osmd, { staffIndex: 0 }).map((s) => s.cursorIndex);
+    // moveToIndex is forward-only, so the repeated steps must keep counting up
+    // (matching the cursor's own stop sequence), not reset to the source ordinal.
+    expect(idx).toEqual([0, 1, 2, 3]);
+  });
+
+  it("doesn't see the repeat's notes as held over from the first pass", async () => {
+    const osmd = await load(REPEAT_XML);
+    // Each note is a fresh onset; nothing carries across the repeat seam.
+    expect(extractSteps(osmd, { staffIndex: 0 }).map((s) => s.sustained)).toEqual([[], [], [], []]);
+  });
+});

@@ -141,11 +141,57 @@ export function getChordPitches(chord: ChordSymbolContainer): number[] {
 }
 
 /**
+ * The order in which OSMD's cursor actually visits source measures, expanding
+ * repeats and jumps. For a piece with a backward repeat after measure 4 this is
+ * `0,1,2,3, 0,1,2,3, 4,5,…` — the cursor plays the section twice.
+ *
+ * OSMD's `MusicPartManagerIterator` is the same machinery that drives the visual
+ * cursor, so reading the measure index off it as it advances reproduces the
+ * cursor's stop sequence exactly. We collapse consecutive duplicates (the
+ * iterator stops several times per measure, once per voice entry) to get one
+ * entry per measure visit. Falls back to a plain linear pass if the iterator is
+ * unavailable, so a score without repeats is unaffected either way.
+ */
+function playbackMeasureOrder(osmd: OpenSheetMusicDisplay): number[] {
+  const measureCount = osmd.Sheet.SourceMeasures.length;
+  const linear = () => Array.from({ length: measureCount }, (_, i) => i);
+
+  const manager = osmd.Sheet.MusicPartManager;
+  if (!manager || typeof manager.getIterator !== 'function') return linear();
+
+  try {
+    const it = manager.getIterator();
+    const order: number[] = [];
+    let last = -1;
+    // Guard against a malformed repeat structure looping forever. Generous cap:
+    // every measure may be visited many times by nested repeats.
+    let guard = 0;
+    const maxGuard = Math.max(1000, measureCount * 50);
+    while (!it.EndReached && guard < maxGuard) {
+      const idx = it.CurrentMeasureIndex;
+      if (idx !== last) {
+        order.push(idx);
+        last = idx;
+      }
+      it.moveToNext();
+      guard++;
+    }
+    return order.length > 0 && guard < maxGuard ? order : linear();
+  } catch {
+    return linear();
+  }
+}
+
+/**
  * Walk OSMD's parsed model into an ordered list of graded steps (component 7).
  *
  * Decisions (per DESIGN.md / ARCHITECTURE.md):
  * - One tracked staff (default top), or `'all'` to merge both hands together.
  * - First voice of each tracked staff only.
+ * - Measures are visited in playback order, so repeats and jumps replay their
+ *   steps — matching the visual cursor, which follows them (see
+ *   `playbackMeasureOrder`). A repeated section therefore appears twice in the
+ *   step list, each occurrence carrying its own ascending `cursorIndex`.
  * - Notes struck together (a chord, or both hands at one timestamp) collapse
  *   into one step.
  * - Tied continuations are skipped: a tied note sounds once at its onset and is
@@ -178,8 +224,21 @@ export function extractSteps(
   let activeChordName: string | undefined = undefined;
   let activeChordPitches: number[] | undefined = undefined;
 
-  for (const measure of osmd.Sheet.SourceMeasures) {
+  // Source-measure indices in the order the cursor plays them (repeats expanded).
+  const order = playbackMeasureOrder(osmd);
+
+  // Running playback ("enrolled") time. Repeated measures share the same source
+  // timestamp, so we offset each visit by the time already elapsed; this keeps
+  // the held-note pass below monotonic and stops a repeat's notes from being
+  // seen as overlapping their first pass.
+  let enrolled = 0;
+
+  for (const measureIndex of order) {
+    const measure = osmd.Sheet.SourceMeasures[measureIndex];
     const keyInstruction = measure.getKeyInstruction(0);
+    // Shift this visit's absolute (source) timestamps onto the enrolled timeline.
+    const offset = enrolled - measure.AbsoluteTimestamp.RealValue;
+    enrolled += measure.Duration.RealValue;
 
     // Containers are the vertical time-slices within a measure, in order.
     for (const container of measure.VerticalSourceStaffEntryContainers) {
@@ -214,7 +273,7 @@ export function extractSteps(
         tracked.push({ entry: container.StaffEntries[staffSel], staff: staffSel });
       }
 
-      const onset = container.getAbsoluteTimestamp().RealValue;
+      const onset = container.getAbsoluteTimestamp().RealValue + offset;
       const pitches: number[] = [];
       const leftOnsets: number[] = [];
       for (const { entry, staff } of tracked) {
