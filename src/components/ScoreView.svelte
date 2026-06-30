@@ -3,6 +3,7 @@
   import { ScoreRenderer } from '../lib/score/ScoreRenderer';
   import type { GradedStep } from '../lib/score/extractor';
   import { GradingEngine, type GradingStatus } from '../lib/engine/grading';
+  import { MetronomeController } from '../lib/metronome/metronome.svelte';
   import type { MidiController } from '../lib/midi/midi.svelte';
   import type { MidiNoteEvent } from '../lib/midi/types';
   import ConnBadge from './ConnBadge.svelte';
@@ -23,6 +24,7 @@
   const HOLD_LEFT = 'rgba(245, 158, 11, 0.45)';
 
   const engine = new GradingEngine();
+  const metronome = new MetronomeController();
 
   type StaffSel = number | 'all';
   type ViewMode = 'both' | 'notes' | 'piano';
@@ -58,6 +60,16 @@
   const handName = $derived(
     staffCount < 2 ? '' : staffSel === 'all' ? 'Both hands' : staffSel === 1 ? 'Left hand' : 'Right hand'
   );
+
+  // Metronome beat is on the bar's first beat (accented click) — used to brighten
+  // the indicator and pulse the keyboard harder on "1".
+  const isDownbeat = $derived(
+    metronome.running && metronome.beatCount >= 0 && metronome.beatCount % metronome.beatsPerBar === 0
+  );
+
+  function adjustBpm(delta: number): void {
+    metronome.bpm = Math.min(300, Math.max(30, metronome.bpm + delta));
+  }
 
   /** Whether pitch n belongs to the left hand at the current step. */
   function isLeft(n: number): boolean {
@@ -132,6 +144,7 @@
       renderer = new ScoreRenderer(container);
       await renderer.load(xml);
       staffCount = renderer.staffCount;
+      metronome.setFromScore(renderer.bpm, renderer.beatsPerBar);
       loaded = true;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
@@ -141,6 +154,7 @@
   onDestroy(() => {
     document.removeEventListener('visibilitychange', onVisibilityChange);
     releaseWakeLock();
+    metronome.dispose();
     unsubscribe?.();
     renderer?.dispose();
   });
@@ -275,6 +289,33 @@
           {/if}
         </div>
       {/if}
+      {#if metronome.supported}
+        <div class="metro" role="group" aria-label="Metronome">
+          <button
+            class="seg metro-toggle"
+            class:active={metronome.running}
+            onclick={() => metronome.toggle()}
+            aria-pressed={metronome.running}
+            title="Metronome">
+            {#key metronome.beatCount}
+              <span class="beat-dot" class:tick={metronome.running} class:down={isDownbeat}></span>
+            {/key}
+            Metronome
+          </button>
+          <div class="bpm">
+            <button class="bpm-btn" onclick={() => adjustBpm(-5)} aria-label="Decrease tempo">−</button>
+            <input
+              class="bpm-val"
+              type="number"
+              min="30"
+              max="300"
+              bind:value={metronome.bpm}
+              aria-label="Tempo in beats per minute" />
+            <span class="bpm-unit">BPM</span>
+            <button class="bpm-btn" onclick={() => adjustBpm(5)} aria-label="Increase tempo">+</button>
+          </div>
+        </div>
+      {/if}
       <div class="staffpick" role="group" aria-label="View mode">
         <button class="seg" class:active={viewMode === 'both'} onclick={() => (viewMode = 'both')} aria-pressed={viewMode === 'both'}>
           Piano + Notes
@@ -299,7 +340,12 @@
   {/if}
 
   {#if viewMode !== 'notes'}
-    <div class="keyboard">
+    <div class="keyboard" class:beating={metronome.running}>
+      {#if metronome.running}
+        {#key metronome.beatCount}
+          <div class="beat-pulse" class:down={isDownbeat}></div>
+        {/key}
+      {/if}
       <div class="keyboard-header">
         <div class="hands">
           {#if bothHands}
@@ -409,9 +455,109 @@
     box-shadow: var(--shadow-sm);
   }
 
+  /* Metronome control */
+  .metro {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: var(--surface-2);
+    border-radius: 999px;
+    padding: 0.2rem 0.35rem 0.2rem 0.2rem;
+  }
+  .metro-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+  .beat-dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: var(--muted);
+    opacity: 0.4;
+  }
+  /* Re-mounted each beat (keyed), so this entry animation replays as a flash. */
+  .beat-dot.tick {
+    animation: beat-flash 0.18s ease-out;
+  }
+  .beat-dot.tick.down {
+    animation: beat-flash-down 0.22s ease-out;
+  }
+  @keyframes beat-flash {
+    from { background: var(--accent); opacity: 1; transform: scale(1.5); }
+    to { background: var(--muted); opacity: 0.4; transform: scale(1); }
+  }
+  @keyframes beat-flash-down {
+    from { background: var(--accent); opacity: 1; transform: scale(1.9); }
+    to { background: var(--muted); opacity: 0.4; transform: scale(1); }
+  }
+  .bpm {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+  }
+  .bpm-btn {
+    background: transparent;
+    color: var(--muted);
+    font-weight: 700;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0.15rem 0.4rem;
+    border-radius: 999px;
+  }
+  .bpm-btn:hover {
+    color: var(--text);
+    background: var(--surface);
+  }
+  .bpm-val {
+    width: 2.6rem;
+    text-align: center;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-weight: 700;
+    font-size: 0.85rem;
+    padding: 0.1rem 0;
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+  .bpm-val::-webkit-outer-spin-button,
+  .bpm-val::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  .bpm-unit {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+  }
+
   /* Keyboard strip */
   .keyboard {
+    position: relative;
     margin-bottom: 0.9rem;
+  }
+  /* A soft beat flash over the keyboard, re-mounted (keyed) each beat to replay. */
+  .beat-pulse {
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-sm);
+    pointer-events: none;
+    z-index: 2;
+    box-shadow: inset 0 0 0 2px var(--accent);
+    animation: keyboard-pulse 0.2s ease-out forwards;
+  }
+  .beat-pulse.down {
+    animation: keyboard-pulse-down 0.26s ease-out forwards;
+  }
+  @keyframes keyboard-pulse {
+    from { opacity: 0.5; }
+    to { opacity: 0; }
+  }
+  @keyframes keyboard-pulse-down {
+    from { opacity: 0.85; }
+    to { opacity: 0; }
   }
   .keyboard-header {
     display: flex;

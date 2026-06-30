@@ -69,6 +69,17 @@ export class ScoreRenderer {
     return this.#osmd.Sheet?.Staves.length ?? 1;
   }
 
+  /** Score's notated tempo in BPM, or 0 if the file carries none. */
+  get bpm(): number {
+    return this.#osmd.Sheet?.DefaultStartTempoInBpm ?? 0;
+  }
+
+  /** Beats per bar (time-signature numerator) of the first measure, default 4. */
+  get beatsPerBar(): number {
+    const ts = this.#osmd.Sheet?.SourceMeasures[0]?.ActiveTimeSignature;
+    return ts?.Numerator ?? 4;
+  }
+
   #scrollToCursor(): void {
     const el = this.#osmd.cursor.cursorElement;
     el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
