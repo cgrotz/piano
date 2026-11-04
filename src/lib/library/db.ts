@@ -16,6 +16,8 @@ export interface ScoreRecord {
   composer: string;
   importedAt: number;
   xml: string;
+  /** Number of bars (absent for scores imported before this was recorded). */
+  bars?: number;
 }
 
 function openDb(): Promise<IDBDatabase> {

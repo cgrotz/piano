@@ -2,6 +2,7 @@ import { addScore, getAllScores, getScore, deleteScore, type ScoreRecord } from 
 import { createMusicImporter } from '../import/importer';
 import { fflateUnzip } from '../import/unzip.fflate';
 import { validateScore } from '../score/validate';
+import { forgetSettings } from './settings';
 import builtinScaleXml from '../samples/c-major-scale.musicxml?raw';
 
 /** A row in the library list. Metadata only — XML is fetched on open via getXml(). */
@@ -11,6 +12,7 @@ export interface LibraryEntry {
   composer: string;
   /** Epoch ms; 0 for the built-in sample. */
   importedAt: number;
+  bars?: number;
   builtIn?: boolean;
 }
 
@@ -91,14 +93,15 @@ export class LibraryController {
   async #importOne(file: File): Promise<void> {
     const score = await this.#importer.import(file);
     // Any staff counts: a voice + piano song may open with a resting vocal line.
-    const stepCount = await validateScore(score.xml, { staffIndex: 'all' });
-    if (stepCount === 0) throw new Error('No playable notes found.');
+    const { steps, bars } = await validateScore(score.xml, { staffIndex: 'all' });
+    if (steps === 0) throw new Error('No playable notes found.');
     await addScore({
       id: crypto.randomUUID(),
       title: score.title,
       composer: score.composer,
       importedAt: Date.now(),
-      xml: score.xml
+      xml: score.xml,
+      bars
     });
   }
 
@@ -107,6 +110,7 @@ export class LibraryController {
     this.error = null;
     try {
       await deleteScore(id);
+      forgetSettings(id);
       this.#apply(await getAllScores());
     } catch (err) {
       this.error = `Couldn't delete the score: ${message(err)}`;
@@ -122,7 +126,7 @@ export class LibraryController {
 
   #apply(records: ScoreRecord[]): void {
     const imported = records
-      .map(({ id, title, composer, importedAt }) => ({ id, title, composer, importedAt }))
+      .map(({ id, title, composer, importedAt, bars }) => ({ id, title, composer, importedAt, bars }))
       .sort((a, b) => b.importedAt - a.importedAt);
     this.entries = [BUILTIN, ...imported];
   }

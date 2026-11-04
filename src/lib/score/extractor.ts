@@ -54,6 +54,13 @@ export interface ExtractOptions {
    * pass the piano's lower staff when other parts (e.g. a vocal line) come first.
    */
   leftStaff?: number;
+  /**
+   * Staves whose notes may be played along without counting as wrong (the
+   * source of `tolerated`) — normally the piano's other hand. Default: every
+   * untracked staff. Pass [] when grading both hands, so a vocal line in the
+   * score never masks an early left-hand press.
+   */
+  alongStaves?: number[];
 }
 
 /**
@@ -185,7 +192,7 @@ function playbackMeasureOrder(osmd: OpenSheetMusicDisplay): number[] {
  *
  * Decisions (per DESIGN.md / ARCHITECTURE.md):
  * - One tracked staff (default top), or several merged (both hands together).
- * - First non-grace voice of each tracked staff only.
+ * - Every voice of each tracked staff (grace, cue and hidden notes excluded).
  * - Measures are visited in playback order, so repeats and jumps replay their
  *   steps — matching the visual cursor, which follows them (see
  *   `playbackMeasureOrder`). A repeated section therefore appears twice in the
@@ -207,6 +214,7 @@ export function extractSteps(
   const trackedStaves = new Set<number>(
     sel === 'all' ? Array.from({ length: staffCount }, (_, i) => i) : Array.isArray(sel) ? sel : [sel]
   );
+  const alongStaves = options.alongStaves ? new Set(options.alongStaves) : null;
   const steps: GradedStep[] = [];
 
   // Staff index treated as the left hand for colouring (top staff = 0).
@@ -270,17 +278,17 @@ export function extractSteps(
       container.StaffEntries.forEach((entry, staff) => {
         if (!entry) return;
         const tracked = trackedStaves.has(staff);
-        // Tracked staves: the first non-grace voice entry. OSMD lists a grace
-        // note's voice entry ahead of the main note it decorates (same staff
-        // entry), so taking VoiceEntries[0] would grade the ornament and drop
-        // the real note. Grace notes are ungraded: the cursor has no stop of
-        // their own. Untracked staves only feed `tolerated`, so take every voice.
-        const mainVoices = entry.VoiceEntries.filter((v) => !v.IsGrace);
-        const voices = tracked ? mainVoices.slice(0, 1) : mainVoices;
+        // Every voice in the staff (a piano hand often has two: melody plus an
+        // inner line), but not grace notes: OSMD lists a grace note's voice
+        // entry ahead of the main note it decorates, and the cursor has no stop
+        // of its own for it, so ornaments stay ungraded.
+        const voices = entry.VoiceEntries.filter((v) => !v.IsGrace);
 
         for (const voiceEntry of voices) {
           for (const note of voiceEntry.Notes) {
             if (note.isRest() || !note.Pitch) continue;
+            // Hidden playback-only notes and small cue notes aren't for the player.
+            if (note.PrintObject === false || note.IsCueNote) continue;
 
             const pitch = osmdHalfToneToMidi(note.halfTone);
             // Record the sounding span (including tied continuations) so the
@@ -335,7 +343,10 @@ export function extractSteps(
           held.add(iv.pitch);
           if (iv.staff === LEFT_STAFF) heldLeft.add(iv.pitch);
         }
-      } else if (soundingHere || (iv.onset >= tPrev - EPS && iv.onset < tNext - EPS)) {
+      } else if (
+        (!alongStaves || alongStaves.has(iv.staff)) &&
+        (soundingHere || (iv.onset >= tPrev - EPS && iv.onset < tNext - EPS))
+      ) {
         tolerated.add(iv.pitch);
       }
     }

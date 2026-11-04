@@ -19,6 +19,8 @@ export interface HandOption {
   staves: number[];
   /** Staff to colour as the left hand (both-hands only). */
   leftStaff?: number;
+  /** Staves you may play along with without it counting (the other hand). */
+  alongStaves: number[];
 }
 
 /**
@@ -33,7 +35,7 @@ export interface HandOption {
  */
 export function handOptions(staves: StaffInfo[]): HandOption[] {
   if (staves.length <= 1) {
-    return [{ id: 'staff-0', label: staves[0]?.partName ?? 'Melody', kind: 'right', staves: [0] }];
+    return [{ id: 'staff-0', label: staves[0]?.partName ?? 'Melody', kind: 'right', staves: [0], alongStaves: [] }];
   }
 
   const upper = staves.find((s) => s.partStaffCount === 2 && s.partStaffIndex === 0);
@@ -41,9 +43,16 @@ export function handOptions(staves: StaffInfo[]): HandOption[] {
   const options: HandOption[] = [];
   if (upper && lower) {
     options.push(
-      { id: 'right', label: 'Right', kind: 'right', staves: [upper.index] },
-      { id: 'left', label: 'Left', kind: 'left', staves: [lower.index] },
-      { id: 'both', label: 'Both', kind: 'both', staves: [upper.index, lower.index], leftStaff: lower.index }
+      { id: 'right', label: 'Right', kind: 'right', staves: [upper.index], alongStaves: [lower.index] },
+      { id: 'left', label: 'Left', kind: 'left', staves: [lower.index], alongStaves: [upper.index] },
+      {
+        id: 'both',
+        label: 'Both',
+        kind: 'both',
+        staves: [upper.index, lower.index],
+        leftStaff: lower.index,
+        alongStaves: []
+      }
     );
   }
 
@@ -51,7 +60,7 @@ export function handOptions(staves: StaffInfo[]): HandOption[] {
     if (s === upper || s === lower) continue;
     const name = s.partName.trim() || `Staff ${s.index + 1}`;
     const label = s.partStaffCount > 1 ? `${name} ${s.partStaffIndex + 1}` : name;
-    options.push({ id: `staff-${s.index}`, label, kind: 'other', staves: [s.index] });
+    options.push({ id: `staff-${s.index}`, label, kind: 'other', staves: [s.index], alongStaves: [] });
   }
   return options;
 }

@@ -2,6 +2,7 @@
   import type { LibraryController, LibraryEntry } from '../lib/library/library.svelte';
   import { midiHelp, type MidiController } from '../lib/midi/midi.svelte';
   import ConnBadge from './ConnBadge.svelte';
+  import { loadSettings } from '../lib/library/settings';
 
   const iconUrl = `${import.meta.env.BASE_URL}icon.svg`;
 
@@ -38,22 +39,37 @@
     }
   }
 
-  function when(ms: number): string {
-    if (ms === 0) return '';
-    const d = new Date(ms);
-    const today = new Date();
-    return d.toDateString() === today.toDateString()
-      ? 'Today'
-      : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  /** "today", "yesterday", "3 days ago", else a short date. */
+  function ago(ms: number): string {
+    const day = (t: number) => Math.floor((t - new Date(t).getTimezoneOffset() * 60000) / 86400000);
+    const days = day(Date.now()) - day(ms);
+    if (days <= 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 7) return `${days} days ago`;
+    return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   }
 
-  function meta(entry: LibraryEntry): string {
-    if (entry.builtIn) return '';
-    const who = entry.composer && entry.composer !== 'Unknown' ? entry.composer : 'Imported';
-    return `${who} · ${when(entry.importedAt)}`;
+  /** Composer · bars · when last practised · best whole-piece accuracy. */
+  function meta(entry: LibraryEntry): string[] {
+    const s = loadSettings(entry.id);
+    const parts: string[] = [];
+    if (!entry.builtIn && entry.composer && entry.composer !== 'Unknown') parts.push(entry.composer);
+    if (entry.bars) parts.push(`${entry.bars} bars`);
+    parts.push(s.lastPractised ? `practised ${ago(s.lastPractised)}` : 'not practised yet');
+    if (s.best !== undefined) parts.push(`best ${s.best}%`);
+    return parts;
   }
 
   const onlyBuiltIn = $derived(library.entries.every((e) => e.builtIn));
+
+  // Search appears once the list is long enough to need it.
+  let query = $state('');
+  const showSearch = $derived(library.entries.length > 8);
+  const visible = $derived.by(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return library.entries;
+    return library.entries.filter((e) => `${e.title} ${e.composer}`.toLowerCase().includes(q));
+  });
 </script>
 
 <section class="library" aria-label="Music library">
@@ -64,14 +80,20 @@
     </div>
     <div class="head-actions">
       <ConnBadge {midi} />
-      <label class="filebtn" class:busy={library.importing} aria-label={library.importing ? `${importLabel} Please wait.` : 'Import MusicXML files'} aria-busy={library.importing}>
+      <label class="filebtn" class:busy={library.importing} aria-busy={library.importing}>
         {#if !library.importing}
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
             <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
           </svg>
         {/if}
         {importLabel}
-        <input type="file" accept=".xml,.musicxml,.mxl" multiple onchange={handleFiles} disabled={library.importing} aria-hidden="true" tabindex="-1" />
+        <input
+          type="file"
+          accept=".xml,.musicxml,.mxl"
+          multiple
+          onchange={handleFiles}
+          disabled={library.importing}
+          aria-label={library.importing ? `${importLabel} Please wait.` : 'Import MusicXML files (.xml, .mxl)'} />
       </label>
     </div>
   </header>
@@ -91,8 +113,15 @@
     <p class="error" role="alert">{library.error}</p>
   {/if}
 
+  {#if showSearch}
+    <input class="search" type="search" placeholder="Search title or composer" bind:value={query} aria-label="Search your library" />
+  {/if}
+
   <ul class="list" aria-label="Scores">
-    {#each library.entries as entry (entry.id)}
+    {#if visible.length === 0}
+      <li class="empty">No pieces match “{query}”.</li>
+    {/if}
+    {#each visible as entry (entry.id)}
       <li>
         <button class="card" onclick={() => onOpen(entry)}>
           <span class="ico" aria-hidden="true">
@@ -104,11 +133,10 @@
           </span>
           <span class="text">
             <span class="title">{entry.title}</span>
-            {#if entry.builtIn}
-              <span class="badge">Built-in</span>
-            {:else}
-              <span class="metaline">{meta(entry)}</span>
-            {/if}
+            <span class="metaline">
+              {#if entry.builtIn}<span class="badge">Built-in</span>{/if}
+              {meta(entry).join(' · ')}
+            </span>
           </span>
           <span class="chev" aria-hidden="true">›</span>
         </button>
@@ -118,6 +146,8 @@
             title="Delete"
             aria-label="Delete {entry.title}"
             onclick={() => confirmDelete(entry)}>✕</button>
+        {:else}
+          <span class="del" aria-hidden="true"></span>
         {/if}
       </li>
     {/each}
@@ -182,8 +212,35 @@
     cursor: progress;
     pointer-events: none;
   }
+  /* Visually hidden but still focusable, so keyboard users can reach Import. */
+  .filebtn {
+    position: relative;
+  }
   .filebtn input {
-    display: none;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .filebtn:focus-within {
+    outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    outline-offset: 2px;
+  }
+  .search {
+    font: inherit;
+    width: 100%;
+    padding: 0.6rem 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    margin-bottom: 0.75rem;
+  }
+  .empty {
+    color: var(--muted);
+    padding: 0.75rem 0.2rem;
   }
   .banner {
     background: var(--accent-soft);
@@ -263,7 +320,7 @@
     text-overflow: ellipsis;
   }
   .badge {
-    align-self: flex-start;
+    margin-right: 0.35rem;
     font-size: 0.72rem;
     font-weight: 600;
     color: var(--muted);
@@ -282,9 +339,15 @@
     flex: none;
   }
   .del {
+    /* Fixed width (and an empty placeholder on built-in rows) keeps every card
+       the same width. */
+    flex: none;
+    width: 2.75rem;
+    display: grid;
+    place-items: center;
     background: transparent;
     color: var(--muted);
-    padding: 0 0.9rem;
+    padding: 0;
     font-weight: 700;
     border-radius: var(--radius-sm);
   }

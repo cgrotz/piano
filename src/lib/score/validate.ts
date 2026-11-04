@@ -7,14 +7,18 @@ import { extractSteps, type ExtractOptions } from './extractor';
  *
  * Loads into a detached OSMD instance but never renders — `load()` populates the
  * musical model (which `extractSteps` reads), while skipping render avoids any
- * layout/canvas work on an off-screen element. Returns the step count.
+ * layout/canvas work on an off-screen element. Returns the graded step count
+ * and the number of bars (for the library list).
  */
-export async function validateScore(xml: string, options?: ExtractOptions): Promise<number> {
+export async function validateScore(
+  xml: string,
+  options?: ExtractOptions
+): Promise<{ steps: number; bars: number }> {
   const div = document.createElement('div');
   const osmd = new OpenSheetMusicDisplay(div);
   try {
     await osmd.load(xml);
-    return extractSteps(osmd, options).length;
+    return { steps: extractSteps(osmd, options).length, bars: osmd.Sheet.SourceMeasures.length };
   } finally {
     osmd.clear();
   }

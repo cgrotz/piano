@@ -58,6 +58,20 @@ export class MidiController {
     this.#refreshInputs();
   }
 
+  /**
+   * Connect silently on startup when this site already has MIDI permission, so
+   * returning players don't have to tap Connect every session. Never prompts.
+   */
+  async reconnectIfGranted(): Promise<void> {
+    if (!this.supported || !navigator.permissions) return;
+    try {
+      const perm = await navigator.permissions.query({ name: 'midi' as PermissionName });
+      if (perm.state === 'granted' && this.status === 'idle') await this.connect();
+    } catch {
+      /* permission name unsupported in this browser — keep the manual Connect */
+    }
+  }
+
   /** Subscribe to normalized note events. Returns an unsubscribe function. */
   subscribe(fn: (event: MidiNoteEvent) => void): () => void {
     this.#subscribers.add(fn);

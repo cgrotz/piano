@@ -29,6 +29,8 @@ describe('handOptions', () => {
       ['Альт', 'other', [0]]
     ]);
     expect(opts[2].leftStaff).toBe(2);
+    // Only the other piano hand may be played along — never the vocal line.
+    expect(opts.map((o) => o.alongStaves)).toEqual([[2], [1], [], []]);
   });
 
   it('labels staves by part when there is no two-staff part', () => {

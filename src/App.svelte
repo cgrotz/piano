@@ -7,11 +7,12 @@
   const midi = new MidiController();
   const library = new LibraryController();
   library.init();
+  midi.reconnectIfGranted();
 
   // Dev-only: lets the preview/automation drive notes without hardware. Stripped from prod.
   if (import.meta.env.DEV) (window as unknown as { pianoMidi: MidiController }).pianoMidi = midi;
 
-  type Selection = { xml: string; title: string };
+  type Selection = { id: string; xml: string; title: string };
   let selection = $state<Selection | null>(null);
   let openError = $state<string | null>(null);
 
@@ -19,7 +20,7 @@
     openError = null;
     try {
       const xml = await library.getXml(entry);
-      selection = { xml, title: entry.title };
+      selection = { id: entry.id, xml, title: entry.title };
     } catch (err) {
       openError = err instanceof Error ? err.message : String(err);
     }
@@ -34,8 +35,8 @@
   {/if}
 
   {#if selection}
-    {#key selection.xml}
-      <ScoreView {midi} xml={selection.xml} title={selection.title} onBack={() => (selection = null)} />
+    {#key selection.id}
+      <ScoreView {midi} id={selection.id} xml={selection.xml} title={selection.title} onBack={() => (selection = null)} />
     {/key}
   {:else}
     <LibraryView {library} {midi} onOpen={openEntry} />

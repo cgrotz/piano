@@ -203,5 +203,13 @@ describe('GradingEngine', () => {
       expect(engine.index).toBe(0);
       expect(engine.pressNote(50)).toBe('wrong');
     });
+
+    it("doesn't let the other hand bank the next step (no silent skip)", () => {
+      // Left hand plays G4 along; the right hand's NEXT note is also G4.
+      engine.load([{ ...step([72], 0), tolerated: [67] }, step([67], 1), step([69], 2)]);
+      expect(engine.pressNote(67)).toBe('ignored');
+      expect(engine.pressNote(72)).toBe('advanced');
+      expect(engine.index).toBe(1); // G4 still has to be played by the right hand
+    });
   });
 });

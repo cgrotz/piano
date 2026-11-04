@@ -7,16 +7,19 @@
   import { clampBpm, MIN_BPM, MAX_BPM } from '../lib/metronome/bpm';
   import { midiHelp, type MidiController } from '../lib/midi/midi.svelte';
   import { handOptions, type HandOption } from '../lib/score/hands';
-  import type { MidiNoteEvent } from '../lib/midi/types';
+  import { pitchName, type MidiNoteEvent } from '../lib/midi/types';
+  import { barSpan, selectBars, withGuideTolerance } from '../lib/practice/steps';
+  import { loadSettings, saveSettings } from '../lib/library/settings';
   import ConnBadge from './ConnBadge.svelte';
   import PianoKeyboard from './PianoKeyboard.svelte';
 
   let {
     midi,
+    id,
     xml,
     title,
     onBack
-  }: { midi: MidiController; xml: string; title: string; onBack: () => void } = $props();
+  }: { midi: MidiController; id: string; xml: string; title: string; onBack: () => void } = $props();
 
   const RIGHT_COLOR = '#4f46e5';
   const LEFT_COLOR = '#f59e0b';
@@ -24,6 +27,7 @@
   // Dimmed hand colours for "keep holding" notes — struck earlier, still sounding.
   const HOLD_RIGHT = 'rgba(79, 70, 229, 0.4)';
   const HOLD_LEFT = 'rgba(245, 158, 11, 0.45)';
+  const GUIDE_COLOR = 'rgba(100, 116, 139, 0.28)';
 
   const engine = new GradingEngine();
   const metronome = new MetronomeController();
@@ -32,7 +36,13 @@
 
   let container: HTMLDivElement;
   let renderer: ScoreRenderer | undefined;
+  // Steps of the current run (the chosen bar range), without / with the chord
+  // guide's notes tolerated. The engine grades `steps`.
+  let baseSteps: GradedStep[] = [];
   let steps: GradedStep[] = [];
+  // Whether the current run covers the whole piece (only then does it count
+  // towards the piece's best accuracy).
+  let wholePiece = true;
   let loaded = $state(false);
   let error = $state<string | null>(null);
   // Practice choices derived from the score's parts (Right/Left/Both for the
@@ -43,6 +53,20 @@
   // Why Start didn't start (no MIDI keyboard, nothing to play in this hand).
   let notice = $state<string | null>(null);
   let viewMode = $state<ViewMode>('both');
+  // Chord-symbol guide keys: shown by default only when the left hand has no
+  // written notes (lead sheets); otherwise they'd clash with the written part.
+  let hasChords = $state(false);
+  let showGuide = $state(false);
+  // Practice range in bar numbers, and whether finishing it starts it again.
+  let barFirst = $state(1);
+  let barLast = $state(1);
+  let fromBar = $state(1);
+  let toBar = $state(1);
+  let loop = $state(false);
+  let loopCount = $state(0);
+  let lastLoopErrors = $state(0);
+  let stepIndex = $state(0);
+  let currentBar = $state<number | null>(null);
 
   let status = $state<GradingStatus>('empty');
   let total = $state(0);
@@ -60,10 +84,13 @@
   // advanced (e.g. a long note held under faster notes) must not turn red.
   let wrongHeld = $state<Set<number>>(new Set());
 
-  const accuracy = $derived(total + errors === 0 ? 100 : Math.round((total / (total + errors)) * 100));
+  const accuracy = $derived(accuracyOf(total, errors));
   const bothHands = $derived(hand?.kind === 'both');
   const handColor = $derived(hand?.kind === 'left' ? LEFT_COLOR : RIGHT_COLOR);
   const handName = $derived(hands.length < 2 || !hand ? '' : nameOf(hand));
+  const rangeOn = $derived(fromBar !== barFirst || toBar !== barLast);
+  // Wrong keys held outside the drawn keyboard — otherwise they'd be invisible.
+  const wrongOutside = $derived([...wrongHeld].filter((p) => p < keyLow || p > keyHigh).sort((a, b) => a - b));
 
   function nameOf(h: HandOption): string {
     return { right: 'Right hand', left: 'Left hand', both: 'Both hands', other: h.label }[h.kind];
@@ -111,9 +138,10 @@
   const litKeys = $derived.by(() => {
     const m = new Map<number, string>();
     if (status !== 'playing') return m;
-    // 1. Left-hand chord guide notes in a dim soft orange/yellow.
-    for (const p of currentChordPitches) {
-      m.set(p, 'rgba(245, 158, 11, 0.35)');
+    // 1. Chord guide notes (when enabled) in a dim neutral tint — suggestions,
+    //    not targets, and deliberately not a hand colour.
+    if (showGuide) {
+      for (const p of currentChordPitches) m.set(p, GUIDE_COLOR);
     }
     // 2. Keep-holding cues: notes struck earlier that should still be down. Dim
     //    hand colour, reinforced by a ring (see holdKeys) so they read as "hold",
@@ -163,11 +191,30 @@
       await renderer.load(xml);
       hands = handOptions(renderer.staves);
       const counts: Record<string, number> = {};
-      for (const h of hands) counts[h.id] = renderer.extractSteps(extractOptions(h)).length;
+      let chords = false;
+      for (const h of hands) {
+        const hs = renderer.extractSteps(extractOptions(h));
+        counts[h.id] = hs.length;
+        chords ||= hs.some((s) => s.chordPitches?.length);
+      }
       handSteps = counts;
-      // Default: the right hand if it has notes, else the first choice that does.
-      hand = hands.find((h) => h.kind === 'right' && counts[h.id] > 0) ?? hands.find((h) => counts[h.id] > 0) ?? hands[0];
+      hasChords = chords;
       metronome.setFromScore(renderer.bpm, renderer.beatsPerBar);
+
+      // Restore this piece's last settings where they still make sense.
+      const saved = loadSettings(id);
+      const playable = (h?: HandOption) => !!h && counts[h.id] > 0;
+      const savedHand = hands.find((h) => h.id === saved.hand);
+      // Default: the right hand if it has notes, else the first choice that does.
+      hand = playable(savedHand)
+        ? savedHand!
+        : (hands.find((h) => h.kind === 'right' && playable(h)) ?? hands.find(playable) ?? hands[0]);
+      const left = hands.find((h) => h.kind === 'left');
+      showGuide = saved.guide ?? (chords && (!left || counts[left.id] === 0));
+      if (saved.view) viewMode = saved.view;
+      if (saved.bpm) metronome.bpm = clampBpm(saved.bpm, metronome.bpm);
+      loop = !!saved.loop;
+      prepareHand(saved.from, saved.to);
       loaded = true;
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
@@ -182,8 +229,32 @@
     renderer?.dispose();
   });
 
+  // Persist preferences whenever they change (after the piece has loaded).
+  $effect(() => {
+    const patch = { hand: hand?.id, view: viewMode, bpm: metronome.bpm, guide: showGuide, from: fromBar, to: toBar, loop };
+    if (loaded) saveSettings(id, patch);
+  });
+
+  /**
+   * Set up for the selected hand before practice: its bar span (restoring a
+   * saved range if it fits) and the keyboard range — computed now, so the
+   * keyboard doesn't jump when Start is pressed.
+   */
+  function prepareHand(from?: number, to?: number) {
+    if (!renderer || !hand) return;
+    const all = renderer.extractSteps(extractOptions(hand));
+    const span = barSpan(all);
+    barFirst = span.first;
+    barLast = span.last;
+    const fits = (n?: number): n is number => n !== undefined && n >= span.first && n <= span.last;
+    fromBar = fits(from) ? from : span.first;
+    toBar = fits(to) && to >= fromBar ? to : span.last;
+    computeRange(all);
+  }
+
   function sync() {
     status = engine.status;
+    stepIndex = engine.index;
     total = engine.total;
     errors = engine.errorCount;
     expected = engine.currentPitches;
@@ -192,6 +263,7 @@
     leftPitches = currentStep?.leftPitches ?? [];
     currentChordName = currentStep?.chordName ?? null;
     currentChordPitches = currentStep?.chordPitches ?? [];
+    currentBar = currentStep?.measure ?? null;
   }
 
   const BLACK_CLASSES = new Set([1, 3, 6, 8, 10]);
@@ -202,7 +274,11 @@
    * black key, nudge it outward to the neighbouring white key so the keyboard
    * doesn't start or end on a floating black key.
    */
-  function computeRange(allPitches: number[]) {
+  function computeRange(forSteps: GradedStep[]) {
+    const allPitches = [
+      ...forSteps.flatMap((s) => s.pitches),
+      ...(showGuide ? forSteps.flatMap((s) => s.chordPitches ?? []) : [])
+    ];
     if (allPitches.length === 0) return;
     let min = Math.min(...allPitches);
     let max = Math.max(...allPitches);
@@ -213,7 +289,7 @@
   }
 
   function extractOptions(h: HandOption) {
-    return { staffIndex: h.staves, leftStaff: h.leftStaff };
+    return { staffIndex: h.staves, leftStaff: h.leftStaff, alongStaves: h.alongStaves };
   }
 
   async function startPractice() {
@@ -231,13 +307,16 @@
       return;
     }
 
-    steps = renderer.extractSteps(extractOptions(hand));
-    computeRange([
-      ...steps.flatMap((s) => s.pitches),
-      ...steps.flatMap((s) => s.chordPitches || [])
-    ]);
+    const all = renderer.extractSteps(extractOptions(hand));
+    const range = selectBars(all, fromBar, toBar) ?? { start: 0, end: all.length - 1 };
+    wholePiece = range.start === 0 && range.end === all.length - 1;
+    baseSteps = all.slice(range.start, range.end + 1);
+    steps = withGuideTolerance(baseSteps, showGuide);
+    computeRange(all);
     engine.load(steps);
+    loopCount = 0;
     wrongHeld = new Set();
+    saveSettings(id, { lastPractised: Date.now() });
     renderer.reset();
     renderer.clearHighlight();
     if (steps.length > 0) renderer.moveToIndex(steps[0].cursorIndex);
@@ -261,7 +340,65 @@
     if (h.id === hand?.id) return;
     hand = h;
     notice = null;
+    // Keep a custom bar range across hands (where it still fits); a whole-piece
+    // range stays whole-piece for the new hand's span.
+    if (rangeOn) prepareHand(fromBar, toBar);
+    else prepareHand();
     if (status === 'playing' || status === 'completed') startPractice();
+  }
+
+  function toggleGuide() {
+    showGuide = !showGuide;
+    if (renderer && hand) computeRange(renderer.extractSteps(extractOptions(hand)));
+    if (status === 'playing') {
+      steps = withGuideTolerance(baseSteps, showGuide);
+      engine.updateSteps(steps);
+      sync();
+    }
+  }
+
+  /** Commit a typed bar number (on change), clamped to the piece; restarts a running practice. */
+  function commitBar(which: 'from' | 'to', input: HTMLInputElement) {
+    const n = Math.round(input.valueAsNumber);
+    const value = Number.isFinite(n) ? Math.min(barLast, Math.max(barFirst, n)) : which === 'from' ? barFirst : barLast;
+    if (which === 'from') {
+      fromBar = value;
+      if (toBar < fromBar) toBar = fromBar;
+    } else {
+      toBar = value;
+      if (fromBar > toBar) fromBar = toBar;
+    }
+    input.value = String(which === 'from' ? fromBar : toBar);
+    if (status === 'playing' || status === 'completed') startPractice();
+  }
+
+  function wholePieceRange() {
+    fromBar = barFirst;
+    toBar = barLast;
+    if (status === 'playing' || status === 'completed') startPractice();
+  }
+
+  function finishRun() {
+    if (!renderer) return;
+    if (loop) {
+      // Go round again straight away; keep a tally so progress is visible.
+      loopCount++;
+      lastLoopErrors = engine.errorCount;
+      restart();
+      return;
+    }
+    renderer.finish();
+    releaseWakeLock();
+    if (wholePiece) {
+      const best = loadSettings(id).best ?? 0;
+      if (accuracyOf(engine.total, engine.errorCount) > best) {
+        saveSettings(id, { best: accuracyOf(engine.total, engine.errorCount) });
+      }
+    }
+  }
+
+  function accuracyOf(n: number, mistakes: number): number {
+    return n + mistakes === 0 ? 100 : Math.round((n / (n + mistakes)) * 100);
   }
 
   function onNote(event: MidiNoteEvent) {
@@ -289,8 +426,8 @@
         break;
       case 'completed':
         renderer.clearHighlight();
-        renderer.finish();
-        releaseWakeLock();
+        sync();
+        finishRun();
         break;
     }
     sync();
@@ -368,6 +505,35 @@
     </div>
   </header>
 
+  <div class="practice-bar">
+    {#if status === 'playing' && currentBar !== null}
+      <div class="progress" aria-live="off">
+        <span class="where">Bar {currentBar} <span class="of">of {barLast}</span></span>
+        <span class="track" aria-hidden="true"><span class="fill" style="width:{total ? (stepIndex / total) * 100 : 0}%"></span></span>
+        {#if loop && loopCount > 0}
+          <span class="loops">Loop {loopCount + 1} · last {lastLoopErrors} {lastLoopErrors === 1 ? 'mistake' : 'mistakes'}</span>
+        {/if}
+      </div>
+    {/if}
+    {#if barLast > barFirst}
+      <div class="range" role="group" aria-label="Practice range">
+        <span class="lbl">Bars</span>
+        <input type="number" min={barFirst} max={barLast} value={fromBar} onchange={(e) => commitBar('from', e.currentTarget)} aria-label="First bar" />
+        <span class="dash">–</span>
+        <input type="number" min={barFirst} max={barLast} value={toBar} onchange={(e) => commitBar('to', e.currentTarget)} aria-label="Last bar" />
+        {#if rangeOn}
+          <button class="seg" onclick={wholePieceRange}>Whole piece</button>
+        {/if}
+        <button class="seg" class:active={loop} aria-pressed={loop} onclick={() => (loop = !loop)} title="Start again automatically after the last bar">⟳ Loop</button>
+      </div>
+    {/if}
+    {#if hasChords}
+      <button class="seg" class:active={showGuide} aria-pressed={showGuide} onclick={toggleGuide} title="Light the chord symbols' notes as a guide (never counted as mistakes)">
+        Chord guide
+      </button>
+    {/if}
+  </div>
+
   {#if error}
     <p class="error" role="alert">Failed: {error}</p>
   {/if}
@@ -391,9 +557,14 @@
             <span class="hand"><span class="dot" style="background:{handColor}"></span>{handName}</span>
           {/if}
         </div>
-        {#if currentChordName}
-          <span class="chord-badge" aria-live="polite">Left Hand Chord: {currentChordName}</span>
-        {/if}
+        <div class="header-right">
+          {#each wrongOutside as p (p)}
+            <span class="wrong-out" title="Wrong key outside the shown keyboard">{p < keyLow ? '◀ ' : ''}{pitchName(p)}{p > keyHigh ? ' ▶' : ''}</span>
+          {/each}
+          {#if currentChordName}
+            <span class="chord-badge" aria-live="polite">Chord: {currentChordName}</span>
+          {/if}
+        </div>
       </div>
       <PianoKeyboard
         low={keyLow}
@@ -688,6 +859,90 @@
   .error {
     color: var(--error);
     margin: 0 0 0.5rem;
+  }
+  .practice-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    margin: -0.3rem 0 0.75rem;
+  }
+  .practice-bar:empty {
+    display: none;
+  }
+  .progress {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex: 1 1 14rem;
+    min-width: 12rem;
+  }
+  .progress .where {
+    font-weight: 700;
+    font-size: 0.95rem;
+    white-space: nowrap;
+  }
+  .progress .of {
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .progress .track {
+    flex: 1;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--surface-3);
+    overflow: hidden;
+  }
+  .progress .fill {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.2s ease;
+  }
+  .progress .loops {
+    color: var(--muted);
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+  .range {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: var(--surface-2);
+    border-radius: 999px;
+    padding: 0.2rem 0.3rem 0.2rem 0.8rem;
+  }
+  .range .lbl {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+  .range input {
+    width: 3.4rem;
+    font: inherit;
+    font-weight: 700;
+    text-align: center;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.2rem 0.2rem;
+    background: var(--surface);
+    color: var(--text);
+  }
+  .range .dash {
+    color: var(--muted);
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .wrong-out {
+    background: var(--error-soft);
+    color: var(--error);
+    border-radius: 999px;
+    padding: 0.15rem 0.55rem;
+    font-size: 0.78rem;
+    font-weight: 700;
   }
   .notice {
     margin: 0 0 0.75rem;

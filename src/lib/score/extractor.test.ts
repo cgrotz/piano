@@ -194,3 +194,34 @@ describe('extractSteps — grace notes', () => {
     expect(steps.map((s) => s.sustained)).toEqual([[], [], [], []]);
   });
 });
+
+/**
+ * One treble staff, two voices: voice 1 holds a half-note melody (E5, D5),
+ * voice 2 plays quarter-note inner notes (C5 G4 B4 G4) — a typical right hand.
+ */
+const TWO_VOICE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0">
+  <part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions><clef><sign>G</sign><line>2</line></clef></attributes>
+      <note><pitch><step>E</step><octave>5</octave></pitch><duration>2</duration><voice>1</voice><type>half</type></note>
+      <note><pitch><step>D</step><octave>5</octave></pitch><duration>2</duration><voice>1</voice><type>half</type></note>
+      <backup><duration>4</duration></backup>
+      <note><pitch><step>C</step><octave>5</octave></pitch><duration>1</duration><voice>2</voice><type>quarter</type></note>
+      <note><pitch><step>G</step><octave>4</octave></pitch><duration>1</duration><voice>2</voice><type>quarter</type></note>
+      <note><pitch><step>B</step><octave>4</octave></pitch><duration>1</duration><voice>2</voice><type>quarter</type></note>
+      <note print-object="no"><pitch><step>G</step><octave>4</octave></pitch><duration>1</duration><voice>2</voice><type>quarter</type></note>
+    </measure>
+  </part>
+</score-partwise>`;
+
+describe('extractSteps — two voices in one staff', () => {
+  it('grades both voices, with the held melody note as a keep-holding cue, and skips hidden notes', async () => {
+    const osmd = new OpenSheetMusicDisplay(document.createElement('div'));
+    await osmd.load(TWO_VOICE_XML);
+    const steps = extractSteps(osmd);
+    expect(steps.map((s) => s.pitches)).toEqual([[72, 76], [67], [71, 74]]);
+    expect(steps.map((s) => s.sustained)).toEqual([[], [76], []]);
+  });
+});

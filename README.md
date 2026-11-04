@@ -46,6 +46,13 @@ Since v1:
 - **Part-aware hand picker.** The piano's two staves give Right / Left / Both even when
   a vocal line comes first; other parts are listed by name. Hands with no notes are
   disabled.
+- **Practise a passage.** Pick a bar range, optionally looping it (with a per-loop
+  mistake count); a progress readout shows the current bar.
+- **Remembered per piece** (on this device): hand, tempo, view, chord guide, bar range
+  and loop; the library shows bars, when you last practised and your best accuracy.
+- **Chord guide** lights the chord symbols' notes in neutral grey — on by default only
+  when the left hand has no written part (lead sheets) — and never counts them as
+  mistakes.
 - **Bulk import** of several files at once, with titles/composers read from the score's
   printed credits when its metadata is empty.
 
@@ -54,11 +61,12 @@ implementation, and the `MusicImporter` that resolves `.mxl` via `META-INF/conta
 
 ### Known limitations / v2
 
-- **First voice only.** Each staff grades its first voice; a second voice in the same
-  staff (e.g. an inner line in the right hand) is ignored. Grace notes are not graded.
+- **Grace notes, cue notes and hidden notes** are not graded (all voices otherwise are).
+- **Same key, both hands.** MIDI can't say which hand pressed a key. When practising
+  one hand while the other plays along, a key both hands use (e.g. a melody doubled
+  between the hands) can be credited to the graded hand.
 - **Both-hands grading is still pitch-only.** Held notes are shown, but releasing one
   early isn't detected.
-- **Staff choice isn't persisted** per piece yet (resets to right hand on reopen).
 - **Dev testing without hardware:** in `npm run dev`, call
   `window.pianoMidi.useVirtualDevice()` then `window.pianoMidi.emitForTest({...})` in
   the console — practice won't start without a (virtual) keyboard.

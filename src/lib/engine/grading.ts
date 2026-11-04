@@ -50,6 +50,15 @@ export class GradingEngine {
     this.load(this.#steps);
   }
 
+  /**
+   * Swap in an equivalent step list (same positions, e.g. with a different
+   * `tolerated` set after toggling the chord guide) without losing progress.
+   */
+  updateSteps(steps: GradedStep[]): void {
+    if (steps.length !== this.#steps.length) throw new Error('updateSteps: step count changed');
+    this.#steps = steps;
+  }
+
   pressNote(pitch: number): NoteOutcome {
     if (this.#status !== 'playing') return 'idle';
 
@@ -61,11 +70,13 @@ export class GradingEngine {
       return 'early';
     }
     if (!step.pitches.includes(pitch)) {
+      // The other hand's note wins over "early": banking it would let the
+      // other hand play the next step for you (a silent skip).
+      if (step.tolerated?.includes(pitch)) return 'ignored';
       if (this.#steps[this.#index + 1]?.pitches.includes(pitch)) {
         this.#early.add(pitch);
         return 'early';
       }
-      if (step.tolerated?.includes(pitch)) return 'ignored';
       this.#errors++;
       return 'wrong';
     }
