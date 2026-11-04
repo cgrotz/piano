@@ -3,7 +3,8 @@
 A web app (PWA) that displays piano sheet music and verifies, note by note, that you
 press the correct keys via MIDI. Pitch-correctness, not timing — it waits for you.
 
-See the design docs in the sibling `tutor` project: `DESIGN.md` and `ARCHITECTURE.md`.
+Design docs: [DESIGN.md](DESIGN.md) (v1 spec) and [ARCHITECTURE.md](ARCHITECTURE.md)
+(components and build order).
 
 ## Status
 
@@ -27,14 +28,28 @@ All seven build steps of the planned sequence are complete (v1):
   the untracked staff — verified 1:1 against a 2-staff score), auto-scroll to the current
   note, and a right-hand/left-hand staff picker for multi-staff scores.
 
+Since v1:
+
+- **Both hands.** A *Both* option merges the two staves into one step sequence. Tied /
+  held notes don't re-trigger while the other hand moves, and the keyboard shows them
+  as dimmed "keep holding" cues, coloured per hand.
+- **Repeats.** Steps follow OSMD's playback order, so repeated sections are graded twice,
+  in step with the visual cursor.
+- **Chord symbols.** `<harmony>` chords are named in the player and their notes lit on
+  the keyboard as a dim guide (guide keys are not graded).
+- **On-screen keyboard** cropped to the piece's range, with Piano / Notes / both views.
+- **Practice metronome** (Web Audio scheduled), seeded from the score's tempo and metre.
+- **Screen wake lock** while practicing.
+
 The import layer uses the swappable `Unzip` port (`src/lib/import/unzip.ts`), its fflate
 implementation, and the `MusicImporter` that resolves `.mxl` via `META-INF/container.xml`.
 
 ### Known limitations / v2
 
-- **Both hands at once.** Grading tracks one staff at a time (the picker switches which).
-  True two-hand grading — held notes overlapping the other hand's onsets — is the v2
-  problem noted in the design docs.
+- **First voice only.** Each staff grades its first voice; a second voice in the same
+  staff (e.g. an inner line in the right hand) is ignored. Grace notes are not graded.
+- **Both-hands grading is still pitch-only.** Held notes are shown, but releasing one
+  early isn't detected.
 - **Staff choice isn't persisted** per piece yet (resets to right hand on reopen).
 
 ## Run
@@ -83,6 +98,7 @@ It deploys to `https://<you>.github.io/piano/`.
 
 ```sh
 npm run check      # svelte-check type checking
+npm test           # vitest unit tests
 npm run build      # production build
 npm run preview    # preview the production build
 ```
@@ -97,9 +113,12 @@ src/
     engine/    GradingEngine (pure core loop)
     import/    Unzip port + fflate impl + MusicImporter (.mxl/container.xml)
     library/   IndexedDB store (db.ts) + reactive LibraryController
+    metronome/ MetronomeController (Web Audio) + BPM clamping
     samples/   bundled C-major-scale.musicxml
   components/
-    LibraryView.svelte   library list + import
-    ScoreView.svelte     player: render + practice loop
+    LibraryView.svelte    library list + import
+    ScoreView.svelte      player: render + practice loop + metronome controls
+    PianoKeyboard.svelte  on-screen keyboard (target / held / wrong keys)
+    ConnBadge.svelte      MIDI connection status + connect button
   App.svelte             shell: MIDI status + library/player switching
 ```

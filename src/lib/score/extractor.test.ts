@@ -164,3 +164,33 @@ describe('extractSteps — repeats', () => {
     expect(extractSteps(osmd, { staffIndex: 0 }).map((s) => s.sustained)).toEqual([[], [], [], []]);
   });
 });
+
+/**
+ * C4, then a slashed grace C#4 decorating D4, then E4, F4. OSMD stores the grace
+ * note's voice entry ahead of D4's in the same staff entry, so a naive
+ * `VoiceEntries[0]` grades C#4 and loses D4 entirely.
+ */
+const GRACE_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="4.0">
+  <part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions><clef><sign>G</sign><line>2</line></clef></attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>
+      <note><grace slash="yes"/><pitch><step>C</step><alter>1</alter><octave>4</octave></pitch><type>eighth</type></note>
+      <note><pitch><step>D</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>
+      <note><pitch><step>E</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>
+      <note><pitch><step>F</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type></note>
+    </measure>
+  </part>
+</score-partwise>`;
+
+describe('extractSteps — grace notes', () => {
+  it('grades the main note, not the grace note before it', async () => {
+    const osmd = new OpenSheetMusicDisplay(document.createElement('div'));
+    await osmd.load(GRACE_XML);
+    const steps = extractSteps(osmd);
+    expect(steps.map((s) => s.pitches)).toEqual([[60], [62], [64], [65]]);
+    expect(steps.map((s) => s.sustained)).toEqual([[], [], [], []]);
+  });
+});

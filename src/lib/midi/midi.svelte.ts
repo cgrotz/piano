@@ -77,11 +77,28 @@ export class MidiController {
     if (!this.#access) return;
     const names: string[] = [];
     for (const input of this.#access.inputs.values()) {
+      // Chrome can keep an unplugged port in the map with state 'disconnected';
+      // it must not count as a live device.
+      if (input.state === 'disconnected') continue;
       names.push(input.name ?? 'Unknown device');
       input.onmidimessage = (ev) => this.#onMessage(ev);
     }
+    // A device that goes away mid-press never sends its note-offs. Release
+    // everything we think is held so keys don't stay lit (or red) forever.
+    if (names.length < this.inputNames.length) this.#releaseAll();
     this.inputNames = names;
     this.status = names.length > 0 ? 'connected' : 'disconnected';
+  }
+
+  /** Synthesize a note-off for every held key and clear the held set. */
+  #releaseAll(): void {
+    if (this.#held.size === 0) return;
+    const pitches = [...this.#held];
+    this.#held.clear();
+    this.heldNotes = [];
+    for (const pitch of pitches) {
+      for (const fn of this.#subscribers) fn({ type: 'noteOff', pitch });
+    }
   }
 
   #onMessage(ev: MIDIMessageEvent): void {

@@ -34,8 +34,17 @@ export class LibraryController {
 
   #importer = createMusicImporter(fflateUnzip);
 
+  /**
+   * Load imported scores. Never rejects: if IndexedDB is unavailable (e.g. some
+   * private-browsing modes) the built-in sample still works and the reason is
+   * surfaced in `error` instead of an unhandled rejection and a silently empty list.
+   */
   async init(): Promise<void> {
-    this.#apply(await getAllScores());
+    try {
+      this.#apply(await getAllScores());
+    } catch (err) {
+      this.error = `Couldn't load your library: ${message(err)}`;
+    }
   }
 
   async importFile(file: File): Promise<void> {
@@ -56,15 +65,21 @@ export class LibraryController {
       });
       this.#apply(await getAllScores());
     } catch (err) {
-      this.error = err instanceof Error ? err.message : String(err);
+      this.error = message(err);
     } finally {
       this.importing = false;
     }
   }
 
+  /** Delete an imported score. Never rejects; failures land in `error`. */
   async remove(id: string): Promise<void> {
-    await deleteScore(id);
-    this.#apply(await getAllScores());
+    this.error = null;
+    try {
+      await deleteScore(id);
+      this.#apply(await getAllScores());
+    } catch (err) {
+      this.error = `Couldn't delete the score: ${message(err)}`;
+    }
   }
 
   async getXml(entry: LibraryEntry): Promise<string> {
@@ -80,4 +95,8 @@ export class LibraryController {
       .sort((a, b) => b.importedAt - a.importedAt);
     this.entries = [BUILTIN, ...imported];
   }
+}
+
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }

@@ -1,4 +1,4 @@
-import { ChordSymbolContainer } from 'opensheetmusicdisplay';
+import { ChordSymbolContainer, ChordSymbolEnum } from 'opensheetmusicdisplay';
 import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 
 /** One graded position: the set of MIDI pitches that must all be played to advance. */
@@ -55,81 +55,65 @@ export function osmdHalfToneToMidi(halfTone: number): number {
 }
 
 /**
+ * Semitone offsets from the root for each chord-symbol kind (MusicXML `<kind>`).
+ * Keyed by OSMD's enum so the mapping is readable and can't silently drift.
+ * `none` (N.C., "no chord") deliberately maps to no notes.
+ */
+const CHORD_OFFSETS: Record<ChordSymbolEnum, number[]> = {
+  [ChordSymbolEnum.major]: [0, 4, 7],
+  [ChordSymbolEnum.minor]: [0, 3, 7],
+  [ChordSymbolEnum.augmented]: [0, 4, 8],
+  [ChordSymbolEnum.diminished]: [0, 3, 6],
+  [ChordSymbolEnum.dominant]: [0, 4, 7, 10],
+  [ChordSymbolEnum.majorseventh]: [0, 4, 7, 11],
+  [ChordSymbolEnum.minorseventh]: [0, 3, 7, 10],
+  [ChordSymbolEnum.diminishedseventh]: [0, 3, 6, 9],
+  [ChordSymbolEnum.augmentedseventh]: [0, 4, 8, 10],
+  [ChordSymbolEnum.halfdiminished]: [0, 3, 6, 10],
+  [ChordSymbolEnum.majorminor]: [0, 3, 7, 11],
+  [ChordSymbolEnum.majorsixth]: [0, 4, 7, 9],
+  [ChordSymbolEnum.minorsixth]: [0, 3, 7, 9],
+  [ChordSymbolEnum.dominantninth]: [0, 4, 7, 10, 14],
+  [ChordSymbolEnum.majorninth]: [0, 4, 7, 11, 14],
+  [ChordSymbolEnum.minorninth]: [0, 3, 7, 10, 14],
+  [ChordSymbolEnum.dominant11th]: [0, 4, 7, 10, 14, 17],
+  [ChordSymbolEnum.major11th]: [0, 4, 7, 11, 14, 17],
+  [ChordSymbolEnum.minor11th]: [0, 3, 7, 10, 14, 17],
+  [ChordSymbolEnum.dominant13th]: [0, 4, 7, 10, 14, 21],
+  [ChordSymbolEnum.major13th]: [0, 4, 7, 11, 14, 21],
+  [ChordSymbolEnum.minor13th]: [0, 3, 7, 10, 14, 21],
+  [ChordSymbolEnum.suspendedsecond]: [0, 2, 7],
+  [ChordSymbolEnum.suspendedfourth]: [0, 5, 7],
+  // Functional chords, spelled from the given root per the MusicXML spec.
+  [ChordSymbolEnum.Neapolitan]: [0, 4, 7],
+  [ChordSymbolEnum.Italian]: [0, 4, 10],
+  [ChordSymbolEnum.French]: [0, 4, 6, 10],
+  [ChordSymbolEnum.German]: [0, 4, 7, 10],
+  [ChordSymbolEnum.pedal]: [0],
+  [ChordSymbolEnum.power]: [0, 7],
+  [ChordSymbolEnum.Tristan]: [0, 6, 10, 15],
+  [ChordSymbolEnum.none]: []
+};
+
+/**
  * Convert an OSMD ChordSymbolContainer into absolute MIDI notes.
  * Places the chord in octave 3, and a slash bass note (if present) in octave 2.
+ * Returns [] for N.C. (`none`) so no guide keys light up.
  */
 export function getChordPitches(chord: ChordSymbolContainer): number[] {
   if (!chord || !chord.RootPitch) return [];
 
-  // 1. Get root pitch class (0-11)
-  const rootHalfTone = chord.RootPitch.getHalfTone();
-  const rootPc = ((rootHalfTone + 12) % 12);
+  const offsets = CHORD_OFFSETS[chord.ChordKind] ?? CHORD_OFFSETS[ChordSymbolEnum.major];
+  if (offsets.length === 0) return [];
 
-  // 2. Map ChordSymbolEnum to semitone offsets
-  // 0: major, 1: minor, 2: augmented, 3: diminished, 4: dominant, 
-  // 5: majorseventh, 6: minorseventh, 7: diminishedseventh, 8: augmentedseventh, 9: halfdiminished
-  // 22: suspendedsecond, 23: suspendedfourth, 29: power
-  let offsets = [0, 4, 7]; // major default
-  const kind = chord.ChordKind;
-  switch (kind) {
-    case 1: // minor
-      offsets = [0, 3, 7];
-      break;
-    case 2: // augmented
-      offsets = [0, 4, 8];
-      break;
-    case 3: // diminished
-      offsets = [0, 3, 6];
-      break;
-    case 4: // dominant
-      offsets = [0, 4, 7, 10];
-      break;
-    case 5: // majorseventh
-      offsets = [0, 4, 7, 11];
-      break;
-    case 6: // minorseventh
-      offsets = [0, 3, 7, 10];
-      break;
-    case 7: // diminishedseventh
-      offsets = [0, 3, 6, 9];
-      break;
-    case 8: // augmentedseventh
-      offsets = [0, 4, 8, 10];
-      break;
-    case 9: // halfdiminished
-      offsets = [0, 3, 6, 10];
-      break;
-    case 11: // majorsixth
-      offsets = [0, 4, 7, 9];
-      break;
-    case 12: // minorsixth
-      offsets = [0, 3, 7, 9];
-      break;
-    case 13: // dominantninth
-      offsets = [0, 4, 7, 10, 14];
-      break;
-    case 14: // majorninth
-      offsets = [0, 4, 7, 11, 14];
-      break;
-    case 15: // minorninth
-      offsets = [0, 3, 7, 10, 14];
-      break;
-    case 22: // suspendedsecond
-      offsets = [0, 2, 7];
-      break;
-    case 23: // suspendedfourth
-      offsets = [0, 5, 7];
-      break;
-    case 29: // power
-      offsets = [0, 7];
-      break;
-  }
+  // Root pitch class (0-11)
+  const rootPc = (chord.RootPitch.getHalfTone() + 12) % 12;
 
-  // 3. Construct chord notes in octave 3 (base note C3 = 48)
+  // Chord notes in octave 3 (base note C3 = 48)
   const rootMidi = 48 + rootPc;
   const pitches = offsets.map((offset) => rootMidi + offset);
 
-  // 4. Handle slash chord bass note if present (place it in octave 2, base C2 = 36)
+  // Slash chord bass note if present (place it in octave 2, base C2 = 36)
   if (chord.BassPitch) {
     const bassHalfTone = chord.BassPitch.getHalfTone();
     const bassPc = ((bassHalfTone + 12) % 12);
@@ -277,7 +261,11 @@ export function extractSteps(
       const pitches: number[] = [];
       const leftOnsets: number[] = [];
       for (const { entry, staff } of tracked) {
-        const voiceEntry = entry.VoiceEntries[0];
+        // First non-grace voice entry. OSMD lists a grace note's voice entry
+        // ahead of the main note it decorates (same staff entry), so taking
+        // VoiceEntries[0] would grade the ornament and drop the real note.
+        // Grace notes are ungraded: the cursor has no stop of their own.
+        const voiceEntry = entry.VoiceEntries.find((v) => !v.IsGrace);
         if (!voiceEntry) continue;
 
         for (const note of voiceEntry.Notes) {

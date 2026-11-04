@@ -4,6 +4,7 @@
   import type { GradedStep } from '../lib/score/extractor';
   import { GradingEngine, type GradingStatus } from '../lib/engine/grading';
   import { MetronomeController } from '../lib/metronome/metronome.svelte';
+  import { clampBpm, MIN_BPM, MAX_BPM } from '../lib/metronome/bpm';
   import type { MidiController } from '../lib/midi/midi.svelte';
   import type { MidiNoteEvent } from '../lib/midi/types';
   import ConnBadge from './ConnBadge.svelte';
@@ -68,7 +69,17 @@
   );
 
   function adjustBpm(delta: number): void {
-    metronome.bpm = Math.min(300, Math.max(30, metronome.bpm + delta));
+    metronome.bpm = clampBpm(metronome.bpm + delta, metronome.bpm);
+  }
+
+  /**
+   * Commit a typed tempo on `change` (Enter/blur/spinner), not on every keystroke:
+   * live binding let partial input like "8" (on the way to "80") schedule a
+   * 7.5 s gap, and an emptied field poisoned the schedule with NaN.
+   */
+  function commitBpm(input: HTMLInputElement): void {
+    metronome.bpm = clampBpm(input.valueAsNumber, metronome.bpm);
+    input.value = String(metronome.bpm); // reflect clamping / restore after clearing
   }
 
   /** Whether pitch n belongs to the left hand at the current step. */
@@ -307,9 +318,10 @@
             <input
               class="bpm-val"
               type="number"
-              min="30"
-              max="300"
-              bind:value={metronome.bpm}
+              min={MIN_BPM}
+              max={MAX_BPM}
+              value={metronome.bpm}
+              onchange={(e) => commitBpm(e.currentTarget)}
               aria-label="Tempo in beats per minute" />
             <span class="bpm-unit">BPM</span>
             <button class="bpm-btn" onclick={() => adjustBpm(5)} aria-label="Increase tempo">+</button>

@@ -26,8 +26,8 @@ export function createMusicImporter(unzip: Unzip): MusicImporter {
         ? await extractMusicXmlFromMxl(bytes, unzip)
         : decoder.decode(bytes);
 
-      // TODO(validation): once OSMD is integrated, parse here and confirm a
-      // non-empty tracked voice before accepting the import (ARCHITECTURE.md, B4).
+      // Musical validation (OSMD parse + ≥1 graded step) happens in
+      // LibraryController.importFile via validateScore, keeping this layer OSMD-free.
       return { xml, ...extractMetadata(xml, file.name) };
     }
   };

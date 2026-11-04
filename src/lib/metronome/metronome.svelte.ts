@@ -1,3 +1,5 @@
+import { clampBpm } from './bpm';
+
 /**
  * Optional practice metronome (independent of grading).
  *
@@ -81,7 +83,7 @@ export class MetronomeController {
 
   /** Apply the score's tempo/metre as the starting values (only when not running). */
   setFromScore(bpm: number, beatsPerBar: number): void {
-    if (bpm > 0) this.bpm = Math.round(bpm);
+    if (bpm > 0) this.bpm = clampBpm(bpm, this.bpm);
     if (beatsPerBar > 0) this.beatsPerBar = beatsPerBar;
   }
 
@@ -99,7 +101,8 @@ export class MetronomeController {
       const isDownbeat = this.#nextBeat % this.beatsPerBar === 0;
       this.#click(this.#nextNoteTime, isDownbeat);
       this.#queue.push({ beat: this.#nextBeat, time: this.#nextNoteTime });
-      this.#nextNoteTime += 60 / this.bpm;
+      // Defensive: never let a bad bpm turn the schedule into NaN/Infinity.
+      this.#nextNoteTime += 60 / clampBpm(this.bpm);
       this.#nextBeat++;
     }
   }

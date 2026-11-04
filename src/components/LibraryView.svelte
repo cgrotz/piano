@@ -22,6 +22,14 @@
     input.value = '';
   }
 
+  // Deletion is permanent and the ✕ is a small touch target next to the card, so
+  // guard against a stray tap on the tablet.
+  function confirmDelete(entry: LibraryEntry) {
+    if (confirm(`Delete “${entry.title}” from your library? This can't be undone.`)) {
+      library.remove(entry.id);
+    }
+  }
+
   function when(ms: number): string {
     if (ms === 0) return '';
     const d = new Date(ms);
@@ -101,7 +109,7 @@
             class="del"
             title="Delete"
             aria-label="Delete {entry.title}"
-            onclick={() => library.remove(entry.id)}>✕</button>
+            onclick={() => confirmDelete(entry)}>✕</button>
         {/if}
       </li>
     {/each}
