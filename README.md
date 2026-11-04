@@ -30,6 +30,17 @@ All seven build steps of the planned sequence are complete (v1):
 
 Since v1:
 
+- **Music-stand layout.** A slim top bar (progress, metronome, Setup, Start/Restart),
+  practice options in a Setup panel, larger type and 44px touch targets, and the score
+  filling the screen: one line zoomed to the available height in landscape, wrapped
+  systems in portrait (re-laid out on rotation, cursor kept in place). One colour per
+  meaning — hand colours to press, dimmed to hold, red for wrong, grey for the chord
+  guide — and the cursor wears the hand's colour. Light and dark themes; in dark mode the
+  score is drawn light-on-dark too.
+- **Metronome-synced keys.** While the metronome runs, the keys to press flash on every
+  click (stronger on the downbeat).
+- **Completion dialog** over the score with notes / mistakes / accuracy, a "new best"
+  marker, and the bars with the most mistakes — one tap loops that bar.
 - **Both hands.** A *Both* option merges the two staves into one step sequence. Tied /
   held notes don't re-trigger while the other hand moves, and the keyboard shows them
   as dimmed "keep holding" cues, coloured per hand.
@@ -117,7 +128,7 @@ It deploys to `https://<you>.github.io/piano/`.
 
 ```sh
 npm run check      # svelte-check type checking
-npm test           # vitest unit tests
+npm test           # vitest unit + session integration tests
 npm run build      # production build
 npm run preview    # preview the production build
 ```
@@ -132,12 +143,17 @@ src/
     engine/    GradingEngine (pure core loop)
     import/    Unzip port + fflate impl + MusicImporter (.mxl/container.xml)
     library/   IndexedDB store (db.ts) + reactive LibraryController
-    metronome/ MetronomeController (Web Audio) + BPM clamping
+    metronome/ MetronomeController (Web Audio) + BPM / beats-per-bar helpers
+    practice/  PracticeSession (one run: hand, bars, loop, grading state),
+               keyLights (keyboard colours), bar-range/guide helpers
     samples/   bundled C-major-scale.musicxml
   components/
-    LibraryView.svelte    library list + import
-    ScoreView.svelte      player: render + practice loop + metronome controls
-    PianoKeyboard.svelte  on-screen keyboard (target / held / wrong keys)
-    ConnBadge.svelte      MIDI connection status + connect button
-  App.svelte             shell: MIDI status + library/player switching
+    LibraryView.svelte       library list, search + import
+    ScoreView.svelte         player screen: top bar, keyboard, sheet (lazy-loaded with OSMD)
+    PracticeSetup.svelte     setup panel: hand, bars, loop, view, chord guide, tempo
+    CompletionDialog.svelte  result + trouble bars
+    PianoKeyboard.svelte     on-screen keyboard (target / held / wrong / beat flash)
+    ConnBadge.svelte         MIDI connection status + connect button
+    Icon.svelte              small SVG icon set
+  App.svelte                shell: library/player switching, MIDI auto-reconnect
 ```

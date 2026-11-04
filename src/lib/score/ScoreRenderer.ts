@@ -4,9 +4,15 @@ import { extractSteps, type ExtractOptions, type GradedStep } from './extractor'
 import type { StaffInfo } from './hands';
 import { beatsPerBar, beatUnitLength } from '../metronome/bpm';
 
-const WRONG_COLOR = '#e5544b';
+// The sheet is always on white paper, so these are fixed (not theme) colours.
+const WRONG_COLOR = '#dc2626';
 const DEFAULT_COLOR = '#000000';
 const COLOR_OPTS = { applyToNoteheads: true, applyToStem: true };
+
+/** 'line': one long zoomed staff line (landscape); 'page': wrapped systems (portrait). */
+export type SheetLayout = 'line' | 'page';
+
+const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
 /**
  * Thin wrapper around an OSMD instance (component 6 in ARCHITECTURE.md).
@@ -15,35 +21,95 @@ const COLOR_OPTS = { applyToNoteheads: true, applyToStem: true };
  * truth for the score. The cursor is driven positionally by container ordinal
  * (see GradedStep.cursorIndex), so the playhead lands exactly on the graded note
  * even across rests, ties, and a second (untracked) staff.
+ *
+ * Layout is chosen by the caller ({@link layout}) and sized to the container:
+ * a single line is zoomed to fill the available height, so notes are as large
+ * as the screen allows when read from a music stand.
  */
 export class ScoreRenderer {
   #osmd: OpenSheetMusicDisplay;
+  #container: HTMLElement;
   /** Current cursor position as a container ordinal (matches GradedStep.cursorIndex). */
   #cursorIndex = 0;
+  #cursorVisible = true;
+  #layout: SheetLayout = 'line';
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, cursorColor = '#4f46e5') {
+    this.#container = container;
     this.#osmd = new OpenSheetMusicDisplay(container, {
-      autoResize: true,
+      // Resizing is driven by the player (debounced, layout-aware), not OSMD.
+      autoResize: false,
       backend: 'svg',
       drawTitle: false,
       drawSubtitle: false,
       drawComposer: false,
       drawCredits: false,
-      renderSingleHorizontalStaffline: true
+      renderSingleHorizontalStaffline: true,
+      cursorsOptions: [{ type: 0, color: cursorColor, alpha: 0.22, follow: true }]
     });
   }
 
-  async load(xml: string): Promise<void> {
+  async load(xml: string, layout: SheetLayout = 'line'): Promise<void> {
     await this.#osmd.load(xml);
-    this.#osmd.render();
-    this.#osmd.cursor.show();
     this.#cursorIndex = 0;
+    this.layout(layout);
+  }
+
+  /**
+   * (Re-)render for the container's current size in the given layout and put
+   * the cursor back where it was. A no-op while the container is hidden.
+   */
+  layout(mode: SheetLayout = this.#layout): void {
+    const osmd = this.#osmd;
+    const box = this.#container;
+    if (!osmd.Sheet || box.clientWidth === 0 || box.clientHeight === 0) return;
+    this.#layout = mode;
+    osmd.setOptions({ renderSingleHorizontalStaffline: mode === 'line' });
+    if (mode === 'line') {
+      // Render once at 1x to measure, then zoom so the staves fill the height.
+      osmd.Zoom = 1;
+      osmd.render();
+      const height = box.querySelector('svg')?.getBoundingClientRect().height ?? 0;
+      const zoom = height > 0 ? clamp((box.clientHeight - 24) / height, 0.75, 2.1) : 1;
+      if (Math.abs(zoom - 1) > 0.04) {
+        osmd.Zoom = zoom;
+        osmd.render();
+      }
+    } else {
+      // Wrapped systems: bigger notes on wider screens, fewer bars per line.
+      osmd.Zoom = clamp(box.clientWidth / 1050, 0.5, 1.5);
+      osmd.render();
+    }
+    this.#restoreCursor();
+  }
+
+  /** Cursor colour follows the hand being practised. */
+  setCursorColor(color: string): void {
+    const cursor = this.#osmd.cursor;
+    if (!cursor) return;
+    cursor.CursorOptions = { ...cursor.CursorOptions, color };
+    if (this.#cursorVisible) cursor.update();
+  }
+
+  #restoreCursor(): void {
+    const cursor = this.#osmd.cursor;
+    if (!cursor) return;
+    const target = this.#cursorIndex;
+    cursor.reset();
+    this.#cursorIndex = 0;
+    if (!this.#cursorVisible) {
+      cursor.hide();
+      return;
+    }
+    cursor.show();
+    this.moveToIndex(target, false);
   }
 
   /** Return the cursor to the first container. */
   reset(): void {
     this.#osmd.cursor.reset();
     this.#osmd.cursor.show();
+    this.#cursorVisible = true;
     this.#cursorIndex = 0;
   }
 
@@ -51,18 +117,19 @@ export class ScoreRenderer {
    * Move the cursor forward to a container ordinal (a GradedStep.cursorIndex).
    * Forward-only: grading never moves backward within a run.
    */
-  moveToIndex(target: number): void {
+  moveToIndex(target: number, smooth = true): void {
     const cursor = this.#osmd.cursor;
     while (this.#cursorIndex < target && !cursor.iterator?.EndReached) {
       cursor.next();
       this.#cursorIndex++;
     }
     cursor.update();
-    this.#scrollToCursor();
+    this.#scrollToCursor(smooth);
   }
 
   /** Hide the cursor (e.g. on completion). */
   finish(): void {
+    this.#cursorVisible = false;
     this.#osmd.cursor.hide();
   }
 
@@ -115,9 +182,20 @@ export class ScoreRenderer {
     return beatsPerBar(ts.Numerator, ts.Denominator, unit);
   }
 
-  #scrollToCursor(): void {
+  /**
+   * Keep the cursor in view with room to read ahead: about a third from the
+   * left in a single line, a quarter from the top when wrapped. Scrolls only
+   * the sheet container (scrollIntoView would also nudge the page itself).
+   */
+  #scrollToCursor(smooth = true): void {
     const el = this.#osmd.cursor.cursorElement;
-    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    const box = this.#container;
+    if (!el || box.clientWidth === 0) return;
+    const b = box.getBoundingClientRect();
+    const c = el.getBoundingClientRect();
+    const left = box.scrollLeft + (c.left - b.left) - b.width * 0.3;
+    const top = this.#layout === 'page' ? box.scrollTop + (c.top - b.top) - b.height * 0.25 : box.scrollTop;
+    box.scrollTo({ left: Math.max(0, left), top: Math.max(0, top), behavior: smooth ? 'smooth' : 'auto' });
   }
 
   /** Extract the graded step sequence from the loaded score (component 7). */

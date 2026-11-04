@@ -58,6 +58,7 @@
     font-size: 0.82rem;
     font-weight: 600;
     max-width: 14rem;
+    min-height: 2.25rem;
   }
   .badge:disabled {
     opacity: 1;
@@ -76,7 +77,7 @@
   }
   .badge.ok {
     background: var(--ok-soft);
-    color: #0f7a37;
+    color: var(--ok-text);
   }
   .badge.error {
     background: var(--error-soft);

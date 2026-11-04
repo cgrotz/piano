@@ -2,7 +2,13 @@
   import { MidiController } from './lib/midi/midi.svelte';
   import { LibraryController, type LibraryEntry } from './lib/library/library.svelte';
   import LibraryView from './components/LibraryView.svelte';
-  import ScoreView from './components/ScoreView.svelte';
+
+  // The player pulls in OSMD (most of the bundle), so it's loaded on demand —
+  // the library appears straight away — and prefetched once the app is idle.
+  const loadPlayer = () => import('./components/ScoreView.svelte');
+  const idle = (fn: () => void) =>
+    'requestIdleCallback' in window ? requestIdleCallback(fn) : setTimeout(fn, 1500);
+  idle(() => void loadPlayer());
 
   const midi = new MidiController();
   const library = new LibraryController();
@@ -36,7 +42,13 @@
 
   {#if selection}
     {#key selection.id}
-      <ScoreView {midi} id={selection.id} xml={selection.xml} title={selection.title} onBack={() => (selection = null)} />
+      {#await loadPlayer()}
+        <p class="note">Opening {selection.title}…</p>
+      {:then { default: ScoreView }}
+        <ScoreView {midi} id={selection.id} xml={selection.xml} title={selection.title} onBack={() => (selection = null)} />
+      {:catch err}
+        <p class="note error" role="alert">Couldn't load the player: {err?.message ?? err}</p>
+      {/await}
     {/key}
   {:else}
     <LibraryView {library} {midi} onOpen={openEntry} />
@@ -48,7 +60,7 @@
     width: 100%;
     height: 100%;
     margin: 0;
-    padding: 1rem 1.25rem;
+    padding: 0;
     display: flex;
     flex-direction: column;
     gap: 1rem;

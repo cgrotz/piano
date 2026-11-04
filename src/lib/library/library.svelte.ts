@@ -1,7 +1,6 @@
 import { addScore, getAllScores, getScore, deleteScore, type ScoreRecord } from './db';
 import { createMusicImporter } from '../import/importer';
 import { fflateUnzip } from '../import/unzip.fflate';
-import { validateScore } from '../score/validate';
 import { forgetSettings } from './settings';
 import builtinScaleXml from '../samples/c-major-scale.musicxml?raw';
 
@@ -93,6 +92,8 @@ export class LibraryController {
   async #importOne(file: File): Promise<void> {
     const score = await this.#importer.import(file);
     // Any staff counts: a voice + piano song may open with a resting vocal line.
+    // Loaded on demand: validation needs OSMD, which the library view otherwise doesn't.
+    const { validateScore } = await import('../score/validate');
     const { steps, bars } = await validateScore(score.xml, { staffIndex: 'all' });
     if (steps === 0) throw new Error('No playable notes found.');
     await addScore({

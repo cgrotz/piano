@@ -166,6 +166,9 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    width: 100%;
+    max-width: 60rem;
+    margin: 0 auto;
   }
   header {
     display: flex;
@@ -197,7 +200,7 @@
     align-items: center;
     gap: 0.4rem;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
     font-weight: 600;
     border-radius: var(--radius-sm);
     padding: 0.55rem 1rem;
@@ -205,7 +208,7 @@
     font-size: 0.9rem;
   }
   .filebtn:hover {
-    background: #4338ca;
+    background: var(--accent-hover);
   }
   .filebtn.busy {
     opacity: 0.6;
@@ -244,7 +247,7 @@
   }
   .banner {
     background: var(--accent-soft);
-    color: #3730a3;
+    color: var(--accent-text);
     border-radius: var(--radius-sm);
     padding: 0.7rem 0.9rem;
     margin-bottom: 0.9rem;
@@ -252,7 +255,7 @@
   }
   .banner.warn {
     background: var(--error-soft);
-    color: #991b1b;
+    color: var(--error-text);
   }
   .banner.subtle {
     background: var(--surface-2);
@@ -272,16 +275,19 @@
     flex-direction: column;
     gap: 0.5rem;
     overflow-y: auto;
+    overflow-x: hidden;
     flex: 1;
     min-height: 0;
   }
   .list li {
+    min-width: 0;
     display: flex;
     gap: 0.5rem;
     align-items: stretch;
   }
   .card {
     flex: 1;
+    min-width: 0; /* let long titles truncate instead of widening the card */
     display: flex;
     align-items: center;
     gap: 0.8rem;

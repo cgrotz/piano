@@ -25,18 +25,20 @@ export default defineConfig(({ command }) => ({
         name: 'Piano Tutor',
         short_name: 'Piano Tutor',
         description: 'Practice sheet music with note-by-note MIDI verification.',
-        theme_color: '#1c1c28',
-        background_color: '#1c1c28',
+        // Match the app's light background (the page's <meta name="theme-color">
+        // switches to the dark value in dark mode).
+        theme_color: '#f3f4f7',
+        background_color: '#f3f4f7',
         display: 'standalone',
+        // Relative paths resolve against the manifest URL (/piano/) rather than
+        // the domain root — keeps icons correct on a project subpath. PNGs are
+        // what Android uses for the home-screen icon; the maskable one keeps the
+        // piano inside the safe zone when the launcher crops it to a circle.
         icons: [
-          {
-            // Relative so it resolves against the manifest URL (/piano/) rather
-            // than the domain root — keeps the icon correct on a project subpath.
-            src: 'icon.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
-            purpose: 'any maskable'
-          }
+          { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+          { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }
         ]
       }
     })
