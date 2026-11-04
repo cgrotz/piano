@@ -5,7 +5,8 @@
   import { GradingEngine, type GradingStatus } from '../lib/engine/grading';
   import { MetronomeController } from '../lib/metronome/metronome.svelte';
   import { clampBpm, MIN_BPM, MAX_BPM } from '../lib/metronome/bpm';
-  import type { MidiController } from '../lib/midi/midi.svelte';
+  import { midiHelp, type MidiController } from '../lib/midi/midi.svelte';
+  import { handOptions, type HandOption } from '../lib/score/hands';
   import type { MidiNoteEvent } from '../lib/midi/types';
   import ConnBadge from './ConnBadge.svelte';
   import PianoKeyboard from './PianoKeyboard.svelte';
@@ -27,7 +28,6 @@
   const engine = new GradingEngine();
   const metronome = new MetronomeController();
 
-  type StaffSel = number | 'all';
   type ViewMode = 'both' | 'notes' | 'piano';
 
   let container: HTMLDivElement;
@@ -35,8 +35,13 @@
   let steps: GradedStep[] = [];
   let loaded = $state(false);
   let error = $state<string | null>(null);
-  let staffCount = $state(1);
-  let staffSel = $state<StaffSel>(0);
+  // Practice choices derived from the score's parts (Right/Left/Both for the
+  // piano, plus e.g. a vocal line by name), with each one's playable step count.
+  let hands = $state<HandOption[]>([]);
+  let handSteps = $state<Record<string, number>>({});
+  let hand = $state<HandOption | null>(null);
+  // Why Start didn't start (no MIDI keyboard, nothing to play in this hand).
+  let notice = $state<string | null>(null);
   let viewMode = $state<ViewMode>('both');
 
   let status = $state<GradingStatus>('empty');
@@ -56,11 +61,13 @@
   let wrongHeld = $state<Set<number>>(new Set());
 
   const accuracy = $derived(total + errors === 0 ? 100 : Math.round((total / (total + errors)) * 100));
-  const bothHands = $derived(staffSel === 'all');
-  const handColor = $derived(staffSel === 1 ? LEFT_COLOR : RIGHT_COLOR);
-  const handName = $derived(
-    staffCount < 2 ? '' : staffSel === 'all' ? 'Both hands' : staffSel === 1 ? 'Left hand' : 'Right hand'
-  );
+  const bothHands = $derived(hand?.kind === 'both');
+  const handColor = $derived(hand?.kind === 'left' ? LEFT_COLOR : RIGHT_COLOR);
+  const handName = $derived(hands.length < 2 || !hand ? '' : nameOf(hand));
+
+  function nameOf(h: HandOption): string {
+    return { right: 'Right hand', left: 'Left hand', both: 'Both hands', other: h.label }[h.kind];
+  }
 
   // Metronome beat is on the bar's first beat (accented click) — used to brighten
   // the indicator and pulse the keyboard harder on "1".
@@ -84,7 +91,7 @@
 
   /** Whether pitch n belongs to the left hand at the current step. */
   function isLeft(n: number): boolean {
-    return bothHands ? leftPitches.includes(n) : staffSel === 1;
+    return bothHands ? leftPitches.includes(n) : hand?.kind === 'left';
   }
 
   /** Solid "press now" colour for a target key. */
@@ -154,7 +161,12 @@
     try {
       renderer = new ScoreRenderer(container);
       await renderer.load(xml);
-      staffCount = renderer.staffCount;
+      hands = handOptions(renderer.staves);
+      const counts: Record<string, number> = {};
+      for (const h of hands) counts[h.id] = renderer.extractSteps(extractOptions(h)).length;
+      handSteps = counts;
+      // Default: the right hand if it has notes, else the first choice that does.
+      hand = hands.find((h) => h.kind === 'right' && counts[h.id] > 0) ?? hands.find((h) => counts[h.id] > 0) ?? hands[0];
       metronome.setFromScore(renderer.bpm, renderer.beatsPerBar);
       loaded = true;
     } catch (err) {
@@ -200,12 +212,26 @@
     keyHigh = max;
   }
 
+  function extractOptions(h: HandOption) {
+    return { staffIndex: h.staves, leftStaff: h.leftStaff };
+  }
+
   async function startPractice() {
-    if (!renderer) return;
+    if (!renderer || !hand) return;
+    notice = null;
+    if (handSteps[hand.id] === 0) {
+      notice = `${nameOf(hand)} has no notes to play in this piece — pick another part.`;
+      return;
+    }
     // Connect on demand: pressing Start is a user gesture, so the MIDI prompt works here.
     if (midi.status !== 'connected') await midi.connect();
+    if (midi.status !== 'connected') {
+      // Without a keyboard nothing can ever advance; say why instead of starting.
+      notice = midiHelp(midi.status);
+      return;
+    }
 
-    steps = renderer.extractSteps({ staffIndex: staffSel });
+    steps = renderer.extractSteps(extractOptions(hand));
     computeRange([
       ...steps.flatMap((s) => s.pitches),
       ...steps.flatMap((s) => s.chordPitches || [])
@@ -231,9 +257,10 @@
     sync();
   }
 
-  function selectStaff(sel: StaffSel) {
-    if (sel === staffSel) return;
-    staffSel = sel;
+  function selectHand(h: HandOption) {
+    if (h.id === hand?.id) return;
+    hand = h;
+    notice = null;
     if (status === 'playing' || status === 'completed') startPractice();
   }
 
@@ -251,7 +278,7 @@
       case 'wrong':
         wrongHeld.add(event.pitch);
         wrongHeld = new Set(wrongHeld);
-        renderer.highlightWrong();
+        renderer.highlightWrong(hand?.staves);
         break;
       case 'progress':
         renderer.clearHighlight();
@@ -279,25 +306,19 @@
     </div>
     <div class="controls">
       <ConnBadge {midi} />
-      {#if staffCount > 1}
+      {#if hands.length > 1}
         <div class="staffpick" role="group" aria-label="Hand selection">
-          {#if staffCount === 2}
-            <button class="seg" class:active={staffSel === 0} onclick={() => selectStaff(0)} aria-pressed={staffSel === 0}>
-              Right
+          {#each hands as h (h.id)}
+            <button
+              class="seg"
+              class:active={h.id === hand?.id}
+              onclick={() => selectHand(h)}
+              aria-pressed={h.id === hand?.id}
+              disabled={handSteps[h.id] === 0}
+              title={handSteps[h.id] === 0 ? `No notes for ${nameOf(h).toLowerCase()} in this piece` : undefined}>
+              {h.label}
             </button>
-            <button class="seg" class:active={staffSel === 1} onclick={() => selectStaff(1)} aria-pressed={staffSel === 1}>
-              Left
-            </button>
-            <button class="seg" class:active={staffSel === 'all'} onclick={() => selectStaff('all')} aria-pressed={staffSel === 'all'}>
-              Both
-            </button>
-          {:else}
-            {#each Array(staffCount) as _, i (i)}
-              <button class="seg" class:active={i === staffSel} onclick={() => selectStaff(i)} aria-pressed={i === staffSel}>
-                Staff {i + 1}
-              </button>
-            {/each}
-          {/if}
+          {/each}
         </div>
       {/if}
       {#if metronome.supported}
@@ -349,6 +370,9 @@
 
   {#if error}
     <p class="error" role="alert">Failed: {error}</p>
+  {/if}
+  {#if notice}
+    <p class="notice" role="status">{notice}</p>
   {/if}
 
   {#if viewMode !== 'notes'}
@@ -664,5 +688,17 @@
   .error {
     color: var(--error);
     margin: 0 0 0.5rem;
+  }
+  .notice {
+    margin: 0 0 0.75rem;
+    padding: 0.6rem 0.85rem;
+    border-radius: var(--radius-sm);
+    background: var(--accent-soft);
+    color: var(--text);
+    font-size: 0.95rem;
+    line-height: 1.45;
+  }
+  .seg:disabled {
+    opacity: 0.4;
   }
 </style>

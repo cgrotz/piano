@@ -65,15 +65,51 @@ describe('createMusicImporter', () => {
       expect(result.composer).toBe('Mozart');
     });
 
-    it('falls back to filename (minus extension) when no title elements exist', async () => {
+    it('falls back to a tidied filename when no title elements exist', async () => {
       const xml = makeXml({});
-      const file = new File([xml], 'my-sonata.xml', { type: 'text/xml' });
+      const file = new File([xml], 'my-sonata_easy.xml', { type: 'text/xml' });
       const importer = createMusicImporter(unusedUnzip);
 
       const result = await importer.import(file);
 
-      expect(result.title).toBe('my-sonata');
+      expect(result.title).toBe('My sonata easy');
       expect(result.composer).toBe('Unknown');
+    });
+
+    const withCredits = (credits: string) =>
+      makeXml({}).replace('<part-list>', `${credits}<part-list>`);
+    const credit = (words: string, size?: number, type?: string) =>
+      `<credit page="1">${type ? `<credit-type>${type}</credit-type>` : ''}<credit-words${size ? ` font-size="${size}"` : ''}>${words}</credit-words></credit>`;
+
+    it('uses typed title/composer credits when <work> is empty', async () => {
+      const xml = withCredits(credit('Balu', 22, 'title') + credit('Kettcar', 10, 'composer'));
+      const result = await createMusicImporter(unusedUnzip).import(new File([xml], 'balu-kettcar.mxl.xml'));
+      expect(result.title).toBe('Balu');
+      expect(result.composer).toBe('Kettcar');
+    });
+
+    it('takes the largest untyped page-1 credit as title and a "Composer:" credit as composer (MuseScore style)', async () => {
+      const xml = withCredits(
+        credit('Howl&apos;s Moving Castle', 14) +
+          credit('Merry-Go-Round Of Life', 24) +
+          credit('Composer: Joe Hisaishi', 12) +
+          credit('Arranger: Alex Patience', 30)
+      );
+      const result = await createMusicImporter(unusedUnzip).import(new File([xml], 'merry-go-round-of-life.xml'));
+      expect(result.title).toBe('Merry-Go-Round Of Life');
+      expect(result.composer).toBe('Joe Hisaishi');
+    });
+
+    it('drops an arranger credit that shares the composer text block', async () => {
+      const xml = withCredits(credit('Moon River', 24) + `<credit page="1"><credit-type>composer</credit-type><credit-words>Henry Mancini</credit-words><credit-words>Arranged by Madeline Stratford</credit-words></credit>`);
+      const result = await createMusicImporter(unusedUnzip).import(new File([xml], 'moon.xml'));
+      expect(result.composer).toBe('Henry Mancini');
+    });
+
+    it('strips "Words and Music by" from the composer', async () => {
+      const xml = makeXml({ workTitle: 'Let It Go', composer: 'Words and Music by Kristen Anderson-Lopez and Robert Lopez' });
+      const result = await createMusicImporter(unusedUnzip).import(new File([xml], 'x.xml'));
+      expect(result.composer).toBe('Kristen Anderson-Lopez and Robert Lopez');
     });
   });
 

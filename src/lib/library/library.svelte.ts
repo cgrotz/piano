@@ -30,6 +30,8 @@ const BUILTIN: LibraryEntry = {
 export class LibraryController {
   entries = $state<LibraryEntry[]>([BUILTIN]);
   importing = $state(false);
+  /** While a batch import runs: files finished so far / total. */
+  progress = $state<{ done: number; total: number } | null>(null);
   error = $state<string | null>(null);
 
   #importer = createMusicImporter(fflateUnzip);
@@ -48,27 +50,56 @@ export class LibraryController {
   }
 
   async importFile(file: File): Promise<void> {
+    return this.importFiles([file]);
+  }
+
+  /**
+   * Import several files in one go, one after another. A bad file doesn't stop
+   * the rest; every failure is reported by name at the end. Never rejects.
+   */
+  async importFiles(files: File[]): Promise<void> {
+    if (files.length === 0) return;
     this.error = null;
     this.importing = true;
+    const failed: string[] = [];
+    let added = 0;
     try {
-      const score = await this.#importer.import(file);
-      const stepCount = await validateScore(score.xml);
-      if (stepCount === 0) {
-        throw new Error('No playable notes found in the top staff.');
+      for (let i = 0; i < files.length; i++) {
+        this.progress = { done: i, total: files.length };
+        try {
+          await this.#importOne(files[i]);
+          added++;
+        } catch (err) {
+          failed.push(files.length === 1 ? message(err) : `${files[i].name}: ${message(err)}`);
+        }
       }
-      await addScore({
-        id: crypto.randomUUID(),
-        title: score.title,
-        composer: score.composer,
-        importedAt: Date.now(),
-        xml: score.xml
-      });
-      this.#apply(await getAllScores());
+      if (added > 0) this.#apply(await getAllScores());
     } catch (err) {
-      this.error = message(err);
+      failed.push(message(err));
     } finally {
       this.importing = false;
+      this.progress = null;
     }
+    if (failed.length > 0) {
+      this.error =
+        files.length === 1
+          ? failed[0]
+          : `${failed.length} of ${files.length} files couldn't be imported:\n${failed.join('\n')}`;
+    }
+  }
+
+  async #importOne(file: File): Promise<void> {
+    const score = await this.#importer.import(file);
+    // Any staff counts: a voice + piano song may open with a resting vocal line.
+    const stepCount = await validateScore(score.xml, { staffIndex: 'all' });
+    if (stepCount === 0) throw new Error('No playable notes found.');
+    await addScore({
+      id: crypto.randomUUID(),
+      title: score.title,
+      composer: score.composer,
+      importedAt: Date.now(),
+      xml: score.xml
+    });
   }
 
   /** Delete an imported score. Never rejects; failures land in `error`. */

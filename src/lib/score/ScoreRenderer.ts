@@ -1,6 +1,8 @@
 import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import type { GraphicalNote } from 'opensheetmusicdisplay';
 import { extractSteps, type ExtractOptions, type GradedStep } from './extractor';
+import type { StaffInfo } from './hands';
+import { beatsPerBar, beatUnitLength } from '../metronome/bpm';
 
 const WRONG_COLOR = '#e5544b';
 const DEFAULT_COLOR = '#000000';
@@ -69,15 +71,48 @@ export class ScoreRenderer {
     return this.#osmd.Sheet?.Staves.length ?? 1;
   }
 
+  /** Every staff with the part it belongs to, in score order. */
+  get staves(): StaffInfo[] {
+    const sheet = this.#osmd.Sheet;
+    if (!sheet) return [];
+    const out: StaffInfo[] = [];
+    sheet.Instruments.forEach((part, p) => {
+      part.Staves.forEach((staff, k) => {
+        out.push({
+          index: sheet.Staves.indexOf(staff),
+          partName: part.Name?.trim() || `Part ${p + 1}`,
+          partStaffIndex: k,
+          partStaffCount: part.Staves.length
+        });
+      });
+    });
+    return out.sort((a, b) => a.index - b.index);
+  }
+
   /** Score's notated tempo in BPM, or 0 if the file carries none. */
   get bpm(): number {
     return this.#osmd.Sheet?.DefaultStartTempoInBpm ?? 0;
   }
 
-  /** Beats per bar (time-signature numerator) of the first measure, default 4. */
+  /**
+   * Metronome clicks per bar for the first measure, following the tempo
+   * marking's beat unit (dotted quarter in 6/8, half in cut time); see
+   * `beatsPerBar` in metronome/bpm.ts.
+   */
   get beatsPerBar(): number {
-    const ts = this.#osmd.Sheet?.SourceMeasures[0]?.ActiveTimeSignature;
-    return ts?.Numerator ?? 4;
+    const sheet = this.#osmd.Sheet;
+    const ts = sheet?.SourceMeasures[0]?.ActiveTimeSignature;
+    if (!ts) return 4;
+    // First explicit tempo marking (<metronome>), if any.
+    let unit: number | undefined;
+    for (const m of sheet.SourceMeasures) {
+      const tempo = m.TempoExpressions?.find((t) => t.InstantaneousTempo)?.InstantaneousTempo;
+      if (tempo) {
+        unit = beatUnitLength(tempo.beatUnit, tempo.dotted);
+        break;
+      }
+    }
+    return beatsPerBar(ts.Numerator, ts.Denominator, unit);
   }
 
   #scrollToCursor(): void {
@@ -90,10 +125,17 @@ export class ScoreRenderer {
     return extractSteps(this.#osmd, options);
   }
 
-  /** Flash the note(s) under the cursor red (wrong-press feedback). No re-render. */
-  highlightWrong(): void {
+  /**
+   * Flash the note(s) under the cursor red (wrong-press feedback). No re-render.
+   * Only notes on `staves` (the ones being graded) turn red — the cursor spans
+   * every staff, and the other hand's notes did nothing wrong.
+   */
+  highlightWrong(staves?: number[]): void {
     this.clearHighlight();
-    const gnotes = this.#osmd.cursor.GNotesUnderCursor();
+    const sheetStaves = this.#osmd.Sheet.Staves;
+    const gnotes = this.#osmd.cursor
+      .GNotesUnderCursor()
+      .filter((g) => !staves || staves.includes(sheetStaves.indexOf(g.sourceNote.ParentStaff)));
     for (const g of gnotes) g.setColor(WRONG_COLOR, COLOR_OPTS);
     this.#highlighted = gnotes;
   }

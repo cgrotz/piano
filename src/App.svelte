@@ -27,15 +27,8 @@
 </script>
 
 <main>
-  {#if midi.status === 'unsupported'}
-    <p class="note">
-      This browser doesn't support Web MIDI. Use Chrome (desktop or Android) — iOS/Safari
-      won't work.
-    </p>
-  {/if}
-  {#if midi.error}
-    <p class="note error" role="alert">{midi.error}</p>
-  {/if}
+  <!-- MIDI problems are explained where they matter (library banner, player
+       notice, badge tooltip) in plain words — not as raw browser errors here. -->
   {#if openError}
     <p class="note error" role="alert">{openError}</p>
   {/if}

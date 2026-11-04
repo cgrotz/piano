@@ -18,6 +18,14 @@ export interface GradedStep {
    * colour held left-hand notes correctly once their onset has scrolled past.
    */
   leftPitches?: number[];
+  /**
+   * Notes from the *untracked* staves that may legitimately be pressed while
+   * this step is current: their onset lies between the neighbouring steps, or
+   * they are sounding here. Lets you play the other hand along while grading
+   * one hand without every one of its notes counting (and glowing) as wrong.
+   * Never overlaps `pitches`; omitted when empty.
+   */
+  tolerated?: number[];
   /** 1-based measure number, for labels/debugging. */
   measure: number;
   /**
@@ -35,11 +43,17 @@ export interface GradedStep {
 
 export interface ExtractOptions {
   /**
-   * Which staff to grade. A 0-based index grades one staff (0 = top = right
-   * hand); `'all'` merges every staff at each container into one step (both
-   * hands together). Default 0.
+   * Which staff/staves to grade (0-based, in score order). A single index grades
+   * one staff; an array merges those staves at each container into one step
+   * (e.g. a piano's two staves = both hands); `'all'` merges every staff.
+   * Default 0.
    */
-  staffIndex?: number | 'all';
+  staffIndex?: number | number[] | 'all';
+  /**
+   * Staff treated as the left hand for colouring (`leftPitches`). Default 1;
+   * pass the piano's lower staff when other parts (e.g. a vocal line) come first.
+   */
+  leftStaff?: number;
 }
 
 /**
@@ -170,8 +184,8 @@ function playbackMeasureOrder(osmd: OpenSheetMusicDisplay): number[] {
  * Walk OSMD's parsed model into an ordered list of graded steps (component 7).
  *
  * Decisions (per DESIGN.md / ARCHITECTURE.md):
- * - One tracked staff (default top), or `'all'` to merge both hands together.
- * - First voice of each tracked staff only.
+ * - One tracked staff (default top), or several merged (both hands together).
+ * - First non-grace voice of each tracked staff only.
  * - Measures are visited in playback order, so repeats and jumps replay their
  *   steps — matching the visual cursor, which follows them (see
  *   `playbackMeasureOrder`). A repeated section therefore appears twice in the
@@ -188,15 +202,19 @@ export function extractSteps(
   osmd: OpenSheetMusicDisplay,
   options: ExtractOptions = {}
 ): GradedStep[] {
-  const staffSel = options.staffIndex ?? 0;
+  const sel = options.staffIndex ?? 0;
+  const staffCount = osmd.Sheet.Staves.length;
+  const trackedStaves = new Set<number>(
+    sel === 'all' ? Array.from({ length: staffCount }, (_, i) => i) : Array.isArray(sel) ? sel : [sel]
+  );
   const steps: GradedStep[] = [];
 
-  // Staff index treated as the left hand for both-hands colouring (top staff = 0).
-  const LEFT_STAFF = 1;
+  // Staff index treated as the left hand for colouring (top staff = 0).
+  const LEFT_STAFF = options.leftStaff ?? 1;
 
-  // Every tracked note as an absolute [onset, end) interval, used after the walk
-  // to work out which pitches are still sounding (held) at each step's onset.
-  const intervals: { onset: number; end: number; pitch: number; staff: number }[] = [];
+  // Every note as an absolute [onset, end) interval. Tracked ones drive the
+  // "keep holding" pass; untracked ones drive `tolerated` (the other hand).
+  const intervals: { onset: number; end: number; pitch: number; staff: number; tracked: boolean }[] = [];
   // Absolute onset time of each pushed step, parallel to `steps`.
   const stepTimes: number[] = [];
 
@@ -246,44 +264,39 @@ export function extractSteps(
         }
       }
 
-      // One staff, or every staff present at this timestamp (both hands). Keep
-      // the staff index alongside the entry so held notes can be hand-coloured.
-      const tracked: { entry: (typeof container.StaffEntries)[number]; staff: number }[] = [];
-      if (staffSel === 'all') {
-        container.StaffEntries.forEach((entry, staff) => {
-          if (entry) tracked.push({ entry, staff });
-        });
-      } else if (container.StaffEntries[staffSel]) {
-        tracked.push({ entry: container.StaffEntries[staffSel], staff: staffSel });
-      }
-
       const onset = container.getAbsoluteTimestamp().RealValue + offset;
       const pitches: number[] = [];
       const leftOnsets: number[] = [];
-      for (const { entry, staff } of tracked) {
-        // First non-grace voice entry. OSMD lists a grace note's voice entry
-        // ahead of the main note it decorates (same staff entry), so taking
-        // VoiceEntries[0] would grade the ornament and drop the real note.
-        // Grace notes are ungraded: the cursor has no stop of their own.
-        const voiceEntry = entry.VoiceEntries.find((v) => !v.IsGrace);
-        if (!voiceEntry) continue;
+      container.StaffEntries.forEach((entry, staff) => {
+        if (!entry) return;
+        const tracked = trackedStaves.has(staff);
+        // Tracked staves: the first non-grace voice entry. OSMD lists a grace
+        // note's voice entry ahead of the main note it decorates (same staff
+        // entry), so taking VoiceEntries[0] would grade the ornament and drop
+        // the real note. Grace notes are ungraded: the cursor has no stop of
+        // their own. Untracked staves only feed `tolerated`, so take every voice.
+        const mainVoices = entry.VoiceEntries.filter((v) => !v.IsGrace);
+        const voices = tracked ? mainVoices.slice(0, 1) : mainVoices;
 
-        for (const note of voiceEntry.Notes) {
-          if (note.isRest() || !note.Pitch) continue;
+        for (const voiceEntry of voices) {
+          for (const note of voiceEntry.Notes) {
+            if (note.isRest() || !note.Pitch) continue;
 
-          const pitch = osmdHalfToneToMidi(note.halfTone);
-          // Record the sounding span (including tied continuations) so the
-          // sustained-pitch pass below sees full coverage of held notes.
-          intervals.push({ onset, end: onset + note.Length.RealValue, pitch, staff });
+            const pitch = osmdHalfToneToMidi(note.halfTone);
+            // Record the sounding span (including tied continuations) so the
+            // sustained-pitch pass below sees full coverage of held notes.
+            intervals.push({ onset, end: onset + note.Length.RealValue, pitch, staff, tracked });
+            if (!tracked) continue;
 
-          // Tied continuation: same Tie, but not the note that started it.
-          const tie = note.NoteTie;
-          if (tie && tie.StartNote !== note) continue;
+            // Tied continuation: same Tie, but not the note that started it.
+            const tie = note.NoteTie;
+            if (tie && tie.StartNote !== note) continue;
 
-          pitches.push(pitch);
-          if (staff === LEFT_STAFF) leftOnsets.push(pitch);
+            pitches.push(pitch);
+            if (staff === LEFT_STAFF) leftOnsets.push(pitch);
+          }
         }
-      }
+      });
 
       if (pitches.length > 0) {
         steps.push({
@@ -299,24 +312,36 @@ export function extractSteps(
     }
   }
 
-  // Second pass: for each step, find pitches whose interval started earlier and
-  // has not yet ended (strictly), i.e. notes still being held at this onset.
+  // Second pass, per step:
+  // - sustained: tracked pitches whose interval started earlier and has not yet
+  //   ended (strictly), i.e. notes still being held at this onset;
+  // - tolerated: untracked pitches struck between the neighbouring steps or
+  //   sounding here — the other hand playing along.
   const EPS = 1e-9;
+  const asc = (set: Set<number>) => [...set].sort((a, b) => a - b);
   for (let i = 0; i < steps.length; i++) {
     const t = stepTimes[i];
+    const tPrev = i > 0 ? stepTimes[i - 1] : -Infinity;
+    const tNext = i + 1 < steps.length ? stepTimes[i + 1] : Infinity;
     const onsetSet = new Set(steps[i].pitches);
     const held = new Set<number>();
     const heldLeft = new Set<number>();
+    const tolerated = new Set<number>();
     for (const iv of intervals) {
-      if (iv.onset < t - EPS && iv.end > t + EPS && !onsetSet.has(iv.pitch)) {
-        held.add(iv.pitch);
-        if (iv.staff === LEFT_STAFF) heldLeft.add(iv.pitch);
+      if (onsetSet.has(iv.pitch)) continue;
+      const soundingHere = iv.onset < t - EPS && iv.end > t + EPS;
+      if (iv.tracked) {
+        if (soundingHere) {
+          held.add(iv.pitch);
+          if (iv.staff === LEFT_STAFF) heldLeft.add(iv.pitch);
+        }
+      } else if (soundingHere || (iv.onset >= tPrev - EPS && iv.onset < tNext - EPS)) {
+        tolerated.add(iv.pitch);
       }
     }
-    steps[i].sustained = [...held].sort((a, b) => a - b);
-    steps[i].leftPitches = [...new Set([...(steps[i].leftPitches ?? []), ...heldLeft])].sort(
-      (a, b) => a - b
-    );
+    steps[i].sustained = asc(held);
+    steps[i].leftPitches = asc(new Set([...(steps[i].leftPitches ?? []), ...heldLeft]));
+    if (tolerated.size > 0) steps[i].tolerated = asc(tolerated);
   }
 
   return steps;

@@ -1,15 +1,16 @@
 <script lang="ts">
-  import type { MidiController, MidiStatus } from '../lib/midi/midi.svelte';
+  import { midiHelp, type MidiController, type MidiStatus } from '../lib/midi/midi.svelte';
 
   let { midi }: { midi: MidiController } = $props();
 
   const TEXT: Record<MidiStatus, string> = {
     unsupported: 'No Web MIDI',
-    idle: 'Not connected',
+    // When tapping does something, say so: the pill is the connect button.
+    idle: 'Connect keyboard',
     requesting: 'Connecting…',
-    denied: 'Access denied',
+    denied: 'MIDI blocked · Retry',
     connected: 'Connected',
-    disconnected: 'No device'
+    disconnected: 'No keyboard · Retry'
   };
 
   const cls = $derived(
@@ -38,7 +39,7 @@
   class:link={canConnect}
   onclick={() => canConnect && midi.connect()}
   disabled={!canConnect && midi.status !== 'connected'}
-  title={canConnect ? 'Connect MIDI keyboard' : label}
+  title={midi.status === 'connected' ? label : [midiHelp(midi.status), midi.error].filter(Boolean).join('\n\n')}
   aria-label={canConnect ? 'Connect MIDI keyboard' : `MIDI status: ${label}`}
   aria-live="polite">
   <span class="dot" aria-hidden="true"></span>
@@ -64,6 +65,14 @@
   }
   .badge.link {
     cursor: pointer;
+    box-shadow: inset 0 0 0 1.5px currentColor;
+  }
+  .badge.link.idle {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .badge.link.idle .dot {
+    background: var(--accent);
   }
   .badge.ok {
     background: var(--ok-soft);

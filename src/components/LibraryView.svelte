@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { LibraryController, LibraryEntry } from '../lib/library/library.svelte';
-  import type { MidiController } from '../lib/midi/midi.svelte';
+  import { midiHelp, type MidiController } from '../lib/midi/midi.svelte';
   import ConnBadge from './ConnBadge.svelte';
 
   const iconUrl = `${import.meta.env.BASE_URL}icon.svg`;
@@ -15,12 +15,20 @@
     onOpen: (entry: LibraryEntry) => void;
   } = $props();
 
-  async function handleFile(event: Event) {
+  async function handleFiles(event: Event) {
     const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (file) await library.importFile(file);
+    const files = [...(input.files ?? [])];
     input.value = '';
+    await library.importFiles(files);
   }
+
+  const importLabel = $derived(
+    !library.importing
+      ? 'Import'
+      : library.progress && library.progress.total > 1
+        ? `Importing ${library.progress.done + 1} of ${library.progress.total}…`
+        : 'Importing…'
+  );
 
   // Deletion is permanent and the ✕ is a small touch target next to the card, so
   // guard against a stray tap on the tablet.
@@ -56,21 +64,21 @@
     </div>
     <div class="head-actions">
       <ConnBadge {midi} />
-      <label class="filebtn" class:busy={library.importing} aria-label={library.importing ? 'Importing file, please wait' : 'Import a MusicXML file'} aria-busy={library.importing}>
+      <label class="filebtn" class:busy={library.importing} aria-label={library.importing ? `${importLabel} Please wait.` : 'Import MusicXML files'} aria-busy={library.importing}>
         {#if !library.importing}
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
             <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
           </svg>
         {/if}
-        {library.importing ? 'Importing…' : 'Import'}
-        <input type="file" accept=".xml,.musicxml,.mxl" onchange={handleFile} disabled={library.importing} aria-hidden="true" tabindex="-1" />
+        {importLabel}
+        <input type="file" accept=".xml,.musicxml,.mxl" multiple onchange={handleFiles} disabled={library.importing} aria-hidden="true" tabindex="-1" />
       </label>
     </div>
   </header>
 
   {#if midi.status !== 'connected'}
-    <div class="banner" role="status">
-      🎹 Connect your MIDI keyboard (top right) to start practicing.
+    <div class="banner" class:warn={midi.status === 'denied' || midi.status === 'unsupported'} role="status">
+      {midiHelp(midi.status)}
     </div>
   {:else if onlyBuiltIn}
     <div class="banner subtle">
@@ -185,6 +193,10 @@
     margin-bottom: 0.9rem;
     font-size: 0.9rem;
   }
+  .banner.warn {
+    background: var(--error-soft);
+    color: #991b1b;
+  }
   .banner.subtle {
     background: var(--surface-2);
     color: var(--muted);
@@ -283,5 +295,6 @@
   .error {
     color: var(--error);
     margin: 0 0 0.75rem;
+    white-space: pre-line; /* one line per failed file */
   }
 </style>

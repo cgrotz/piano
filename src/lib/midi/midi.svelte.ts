@@ -64,9 +64,22 @@ export class MidiController {
     return () => this.#subscribers.delete(fn);
   }
 
-  /** Inject a note event as if it came from the device (for testing/automation). */
+  /**
+   * Inject a note event as if it came from the device (for testing/automation).
+   * Goes through the same path as real input, so held-key tracking applies.
+   */
   emitForTest(event: MidiNoteEvent): void {
-    for (const fn of this.#subscribers) fn(event);
+    this.#handle(event);
+  }
+
+  /**
+   * Dev/automation only: pretend a keyboard is connected so the practice flow
+   * (which refuses to start without one) can be driven via `emitForTest`.
+   */
+  useVirtualDevice(): void {
+    this.inputNames = ['Virtual keyboard (dev)'];
+    this.status = 'connected';
+    this.error = null;
   }
 
   clearLog(): void {
@@ -104,8 +117,10 @@ export class MidiController {
   #onMessage(ev: MIDIMessageEvent): void {
     if (!ev.data) return;
     const event = parseMidiMessage(ev.data);
-    if (!event) return;
+    if (event) this.#handle(event);
+  }
 
+  #handle(event: MidiNoteEvent): void {
     if (event.type === 'noteOn') {
       this.#held.add(event.pitch);
     } else {
@@ -115,5 +130,26 @@ export class MidiController {
 
     this.log = [{ event, at: performance.now() }, ...this.log].slice(0, 60);
     for (const fn of this.#subscribers) fn(event);
+  }
+}
+
+/**
+ * What to tell the player for a MIDI state that blocks practice, in plain words
+ * with the next step — rather than the browser's raw exception text.
+ */
+export function midiHelp(status: MidiStatus): string {
+  switch (status) {
+    case 'unsupported':
+      return "This browser can't talk to MIDI keyboards. Use Chrome on Android or a desktop computer (iPad/iPhone browsers don't support Web MIDI).";
+    case 'denied':
+      return 'MIDI access is blocked for this site. Allow it in Chrome (lock icon in the address bar → Site settings → MIDI devices), then tap Connect.';
+    case 'disconnected':
+      return 'No MIDI keyboard found. Plug it in (on a tablet via a USB-OTG adapter), switch it on, then tap Connect.';
+    case 'requesting':
+      return 'Waiting for MIDI permission — accept the browser prompt.';
+    case 'idle':
+      return 'Connect your MIDI keyboard to start practising.';
+    case 'connected':
+      return '';
   }
 }

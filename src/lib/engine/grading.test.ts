@@ -152,4 +152,56 @@ describe('GradingEngine', () => {
       expect(engine.currentPitches).toEqual([]);
     });
   });
+
+  describe('early presses (next step)', () => {
+    it('banks a next-step pitch instead of counting it wrong', () => {
+      engine.load([step([72], 0), step([48, 76], 1), step([79], 2)]);
+      // Left hand C3 lands a hair before the right hand finishes C5.
+      expect(engine.pressNote(48)).toBe('early');
+      expect(engine.errorCount).toBe(0);
+      expect(engine.pressNote(72)).toBe('advanced');
+      // C3 is already counted for step 1 — no re-strike of the held key needed.
+      expect(engine.satisfiedPitches).toEqual([48]);
+      expect(engine.pressNote(76)).toBe('advanced');
+      expect(engine.index).toBe(2);
+    });
+
+    it('chains through a step fully satisfied by banked notes', () => {
+      engine.load([step([60], 0), step([48], 1), step([62], 2)]);
+      expect(engine.pressNote(48)).toBe('early');
+      expect(engine.pressNote(60)).toBe('advanced');
+      expect(engine.index).toBe(2);
+    });
+
+    it('prefers the current step for a pitch both steps share (repeated notes)', () => {
+      engine.load([step([60], 0), step([60], 1)]);
+      expect(engine.pressNote(60)).toBe('advanced');
+      expect(engine.pressNote(60)).toBe('completed');
+    });
+
+    it('banks a re-struck, already-satisfied tone that the next step repeats', () => {
+      // Step 0 = {C3, E5}; step 1 = {C3}. C3 pressed, then pressed again early.
+      engine.load([step([48, 76], 0), step([48], 1), step([79], 2)]);
+      expect(engine.pressNote(48)).toBe('progress');
+      expect(engine.pressNote(48)).toBe('early');
+      expect(engine.pressNote(76)).toBe('advanced');
+      expect(engine.index).toBe(2);
+    });
+
+    it('still counts pitches from two steps ahead as wrong', () => {
+      engine.load([step([60], 0), step([62], 1), step([64], 2)]);
+      expect(engine.pressNote(64)).toBe('wrong');
+      expect(engine.errorCount).toBe(1);
+    });
+  });
+
+  describe('tolerated pitches (other hand playing along)', () => {
+    it('ignores them: no error, no progress', () => {
+      engine.load([{ ...step([72], 0), tolerated: [48, 55] }, step([74], 1)]);
+      expect(engine.pressNote(48)).toBe('ignored');
+      expect(engine.errorCount).toBe(0);
+      expect(engine.index).toBe(0);
+      expect(engine.pressNote(50)).toBe('wrong');
+    });
+  });
 });

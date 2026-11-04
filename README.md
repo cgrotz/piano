@@ -40,6 +40,14 @@ Since v1:
 - **On-screen keyboard** cropped to the piece's range, with Piano / Notes / both views.
 - **Practice metronome** (Web Audio scheduled), seeded from the score's tempo and metre.
 - **Screen wake lock** while practicing.
+- **Forgiving grading for real hands.** Practising one hand while playing the other
+  along doesn't count the other hand's notes as mistakes, and a note of the *next*
+  step played a hair early is credited to it (no re-striking a key you're holding).
+- **Part-aware hand picker.** The piano's two staves give Right / Left / Both even when
+  a vocal line comes first; other parts are listed by name. Hands with no notes are
+  disabled.
+- **Bulk import** of several files at once, with titles/composers read from the score's
+  printed credits when its metadata is empty.
 
 The import layer uses the swappable `Unzip` port (`src/lib/import/unzip.ts`), its fflate
 implementation, and the `MusicImporter` that resolves `.mxl` via `META-INF/container.xml`.
@@ -51,6 +59,9 @@ implementation, and the `MusicImporter` that resolves `.mxl` via `META-INF/conta
 - **Both-hands grading is still pitch-only.** Held notes are shown, but releasing one
   early isn't detected.
 - **Staff choice isn't persisted** per piece yet (resets to right hand on reopen).
+- **Dev testing without hardware:** in `npm run dev`, call
+  `window.pianoMidi.useVirtualDevice()` then `window.pianoMidi.emitForTest({...})` in
+  the console — practice won't start without a (virtual) keyboard.
 
 ## Run
 
