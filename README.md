@@ -37,6 +37,9 @@ Since v1:
   meaning — hand colours to press, dimmed to hold, red for wrong, grey for the chord
   guide — and the cursor wears the hand's colour. Light and dark themes; in dark mode the
   score is drawn light-on-dark too.
+- **"Keep holding" hint.** Let go of a note the score still wants sounding (past the next
+  note you play) and the player says so — never counted as a mistake, and silent while
+  the sustain pedal (CC64) is down.
 - **Metronome-synced keys.** While the metronome runs, the keys to press flash on every
   click (stronger on the downbeat).
 - **Completion dialog** over the score with notes / mistakes / accuracy, a "new best"
@@ -50,7 +53,8 @@ Since v1:
   the keyboard as a dim guide (guide keys are not graded).
 - **On-screen keyboard** cropped to the piece's range, with Piano / Notes / both views.
 - **Practice metronome** (Web Audio scheduled), seeded from the score's tempo and metre.
-- **Screen wake lock** while practicing.
+- **Screen stays awake** while a song is open (Screen Wake Lock API; re-requested after
+  switching apps, released back in the library).
 - **Forgiving grading for real hands.** Practising one hand while playing the other
   along doesn't count the other hand's notes as mistakes, and a note of the *next*
   step played a hair early is credited to it (no re-striking a key you're holding).
@@ -60,7 +64,8 @@ Since v1:
 - **Practise a passage.** Pick a bar range, optionally looping it (with a per-loop
   mistake count); a progress readout shows the current bar.
 - **Remembered per piece** (on this device): hand, tempo, view, chord guide, bar range
-  and loop; the library shows bars, when you last practised and your best accuracy.
+  and loop; the library shows bars, when you last practised and your best accuracy, and
+  sorts by recently practised, title or date added.
 - **Chord guide** lights the chord symbols' notes in neutral grey — on by default only
   when the left hand has no written part (lead sheets) — and never counts them as
   mistakes.
@@ -75,9 +80,12 @@ implementation, and the `MusicImporter` that resolves `.mxl` via `META-INF/conta
 - **Grace notes, cue notes and hidden notes** are not graded (all voices otherwise are).
 - **Same key, both hands.** MIDI can't say which hand pressed a key. When practising
   one hand while the other plays along, a key both hands use (e.g. a melody doubled
-  between the hands) can be credited to the graded hand.
-- **Both-hands grading is still pitch-only.** Held notes are shown, but releasing one
-  early isn't detected.
+  between the hands, or hands crossing as in Clair de Lune) can be credited to the
+  graded hand.
+- **Build-tool audit warnings.** `npm audit` still lists `deepmerge`/`glob`/`minimatch`
+  advisories inside `vite-plugin-pwa`'s workbox tooling (build-time only, not shipped);
+  no compatible fix exists upstream yet.
+- **Grading is pitch-only.** Timing isn't graded; early releases only get a hint.
 - **Dev testing without hardware:** in `npm run dev`, call
   `window.pianoMidi.useVirtualDevice()` then `window.pianoMidi.emitForTest({...})` in
   the console — practice won't start without a (virtual) keyboard.

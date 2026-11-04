@@ -15,6 +15,15 @@ export interface NoteOff {
 
 export type MidiNoteEvent = NoteOn | NoteOff;
 
+/** Sustain pedal (CC64) pressed or released. */
+export interface Pedal {
+  type: 'pedal';
+  down: boolean;
+}
+
+/** Everything the app listens to from the keyboard. */
+export type MidiEvent = MidiNoteEvent | Pedal;
+
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
 /** Human-readable name for a pitch, e.g. 60 -> "C4". */

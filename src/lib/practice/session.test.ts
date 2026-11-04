@@ -117,4 +117,52 @@ describe('PracticeSession', () => {
     s.handle({ type: 'noteOff', pitch: 70 });
     expect(s.wrongHeld.size).toBe(0);
   });
+
+  describe('keep-holding hint', () => {
+    // A held C3 (48) under three right-hand notes, then the right hand alone.
+    const HOLD: GradedStep[] = [
+      { pitches: [48, 72], measure: 1, cursorIndex: 0 },
+      { pitches: [74], measure: 1, cursorIndex: 1, sustained: [48] },
+      { pitches: [76], measure: 1, cursorIndex: 2, sustained: [48] },
+      { pitches: [77], measure: 2, cursorIndex: 3, sustained: [48] },
+      { pitches: [79], measure: 2, cursorIndex: 4 }
+    ];
+    const hold = () => {
+      const rr = new FakeRenderer();
+      rr.extractSteps = () => HOLD.map((x) => ({ ...x }));
+      const ss = new PracticeSession(rr);
+      ss.prepare({ ...RIGHT, id: 'both', kind: 'both', staves: [0, 1], alongStaves: [] });
+      ss.start();
+      return ss;
+    };
+    const press = (ss: PracticeSession, p: number) => ss.handle({ type: 'noteOn', pitch: p, velocity: 80 });
+    const release = (ss: PracticeSession, p: number) => ss.handle({ type: 'noteOff', pitch: p });
+
+    it('hints when a note that must keep sounding is released early', () => {
+      const ss = hold();
+      press(ss, 48); press(ss, 72); release(ss, 72);
+      release(ss, 48); // at step 1, and C3 is still held at step 2
+      expect(ss.releasedEarly).toEqual([48]);
+      expect(ss.errors).toBe(0);
+      press(ss, 48); // pressed again: hint gone, and not a mistake
+      expect(ss.releasedEarly).toEqual([]);
+      expect(ss.errors).toBe(0);
+      expect(ss.wrongHeld.size).toBe(0);
+    });
+
+    it("doesn't hint for a release right before the note's written end", () => {
+      const ss = hold();
+      press(ss, 48); press(ss, 72); press(ss, 74); press(ss, 76);
+      release(ss, 48); // at step 3: C3 isn't held any more at step 4
+      expect(ss.releasedEarly).toEqual([]);
+    });
+
+    it("doesn't hint while the sustain pedal is down", () => {
+      const ss = hold();
+      press(ss, 48); press(ss, 72);
+      ss.handle({ type: 'pedal', down: true });
+      release(ss, 48);
+      expect(ss.releasedEarly).toEqual([]);
+    });
+  });
 });

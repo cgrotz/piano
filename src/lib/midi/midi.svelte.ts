@@ -1,5 +1,5 @@
 import { parseMidiMessage } from './parser';
-import type { MidiNoteEvent, MidiPitch } from './types';
+import type { MidiEvent, MidiPitch } from './types';
 
 export type MidiStatus =
   | 'unsupported' // browser has no Web MIDI API (e.g. any iOS browser)
@@ -10,7 +10,7 @@ export type MidiStatus =
   | 'disconnected'; // access granted, but no input devices
 
 export interface MidiLogEntry {
-  event: MidiNoteEvent;
+  event: MidiEvent;
   at: number;
 }
 
@@ -31,9 +31,11 @@ export class MidiController {
   log = $state<MidiLogEntry[]>([]);
   /** Keys currently held down (needed for chord grading later). */
   heldNotes = $state<MidiPitch[]>([]);
+  /** Sustain pedal currently down. */
+  pedalDown = $state(false);
 
   #access: MIDIAccess | null = null;
-  #subscribers = new Set<(event: MidiNoteEvent) => void>();
+  #subscribers = new Set<(event: MidiEvent) => void>();
   #held = new Set<MidiPitch>();
 
   get supported(): boolean {
@@ -73,7 +75,7 @@ export class MidiController {
   }
 
   /** Subscribe to normalized note events. Returns an unsubscribe function. */
-  subscribe(fn: (event: MidiNoteEvent) => void): () => void {
+  subscribe(fn: (event: MidiEvent) => void): () => void {
     this.#subscribers.add(fn);
     return () => this.#subscribers.delete(fn);
   }
@@ -82,7 +84,7 @@ export class MidiController {
    * Inject a note event as if it came from the device (for testing/automation).
    * Goes through the same path as real input, so held-key tracking applies.
    */
-  emitForTest(event: MidiNoteEvent): void {
+  emitForTest(event: MidiEvent): void {
     this.#handle(event);
   }
 
@@ -134,7 +136,12 @@ export class MidiController {
     if (event) this.#handle(event);
   }
 
-  #handle(event: MidiNoteEvent): void {
+  #handle(event: MidiEvent): void {
+    if (event.type === 'pedal') {
+      this.pedalDown = event.down;
+      for (const fn of this.#subscribers) fn(event);
+      return;
+    }
     if (event.type === 'noteOn') {
       this.#held.add(event.pitch);
     } else {

@@ -115,22 +115,35 @@
   let relayoutTimer: ReturnType<typeof setTimeout> | undefined;
   let lastLaidOut = { w: 0, h: 0, layout: '' };
 
+  /**
+   * Keep the screen on for as long as a song is open — reading through before
+   * Start and pausing between runs included — on a music stand nobody touches
+   * the screen. Released when leaving for the library. Android drops the lock
+   * whenever the page is hidden, so it's re-requested on return.
+   */
+  let destroyed = false;
   async function acquireWakeLock() {
-    if (!('wakeLock' in navigator)) return;
+    if (!('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
+    if (wakeLock && !wakeLock.released) return;
     try {
-      wakeLock = await navigator.wakeLock.request('screen');
+      const lock = await navigator.wakeLock.request('screen');
+      if (destroyed) {
+        void lock.release(); // left the player while the request was pending
+        return;
+      }
+      wakeLock = lock;
     } catch {
-      /* denied or unsupported — practice still works, screen may sleep */
+      /* denied (e.g. battery saver) or unsupported — practice still works, screen may sleep */
     }
   }
 
   function releaseWakeLock() {
-    wakeLock?.release();
+    void wakeLock?.release();
     wakeLock = null;
   }
 
   function onVisibilityChange() {
-    if (document.visibilityState === 'visible' && playing) acquireWakeLock();
+    if (document.visibilityState === 'visible') acquireWakeLock();
   }
 
   /** Re-render the sheet for its new size/shape (debounced; skipped while hidden). */
@@ -151,6 +164,7 @@
   onMount(async () => {
     document.addEventListener('visibilitychange', onVisibilityChange);
     darkQuery.addEventListener('change', onSchemeChange);
+    acquireWakeLock();
     unsubscribe = midi.subscribe((e) => session.handle(e));
     try {
       renderer = new ScoreRenderer(container, cursorColor());
@@ -192,6 +206,7 @@
   });
 
   onDestroy(() => {
+    destroyed = true;
     document.removeEventListener('visibilitychange', onVisibilityChange);
     darkQuery.removeEventListener('change', onSchemeChange);
     resizeObserver?.disconnect();
@@ -247,14 +262,12 @@
     dismissedResult = false;
     newBest = false;
     saveSettings(id, { lastPractised: Date.now() });
-    acquireWakeLock();
   }
 
   function playAgain() {
     dismissedResult = false;
     newBest = false;
     session.restart();
-    acquireWakeLock();
   }
 
   /** From the result's trouble list: loop just that bar. */
@@ -264,11 +277,9 @@
     dismissedResult = false;
     newBest = false;
     session.start();
-    acquireWakeLock();
   }
 
   function onComplete(r: RunResult) {
-    releaseWakeLock();
     resultScope = scopeLabel;
     if (r.wholePiece) {
       const best = loadSettings(id).best;
@@ -378,6 +389,11 @@
             {/if}
           </div>
           <div class="header-right">
+            {#if playing}
+              {#each session.releasedEarly as p (p)}
+                <span class="hold-hint" class:left={session.isLeft(p)} role="status">Keep holding {pitchName(p)}</span>
+              {/each}
+            {/if}
             {#each wrongOutside as p (p)}
               <span class="wrong-out" title="Wrong key outside the shown keyboard"
                 >{p < session.keyLow ? '◀ ' : ''}{pitchName(p)}{p > session.keyHigh ? ' ▶' : ''}</span>
@@ -452,6 +468,7 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
+    overflow: hidden;
     flex: 0 1 auto;
     max-width: 32ch;
   }
@@ -569,6 +586,36 @@
       display: none;
     }
   }
+  /* Phones: title + icon actions on one row, progress on its own row below. */
+  @media (max-width: 640px) {
+    .titleblock {
+      flex: 1 1 0;
+      max-width: none;
+    }
+    .spacer {
+      display: none;
+    }
+    .actions {
+      flex-wrap: nowrap;
+      gap: 0.3rem;
+    }
+    /* Tempo is in Setup; the metronome button keeps just its beat dot + icon. */
+    .metro .bpm {
+      display: none;
+    }
+    .actions button {
+      padding-inline: 0.7rem;
+    }
+    .sub {
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .progress {
+      order: 3;
+      flex: 1 1 100%;
+      padding: 0 0.2rem;
+    }
+  }
 
   .banner {
     margin: 0;
@@ -665,6 +712,19 @@
     font-size: 0.9rem;
     font-weight: 800;
     color: var(--text);
+  }
+  .hold-hint {
+    border-radius: 999px;
+    padding: 0.2rem 0.7rem;
+    font-size: 0.85rem;
+    font-weight: 800;
+    color: var(--text);
+    background: var(--hand-right-hold);
+    box-shadow: inset 0 0 0 2px var(--hand-right);
+  }
+  .hold-hint.left {
+    background: var(--hand-left-hold);
+    box-shadow: inset 0 0 0 2px var(--hand-left);
   }
   .wrong-out {
     background: var(--error-soft);

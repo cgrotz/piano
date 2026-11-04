@@ -1,7 +1,7 @@
 import { GradingEngine, type GradingStatus } from '../engine/grading';
 import type { ExtractOptions, GradedStep } from '../score/extractor';
 import type { HandOption } from '../score/hands';
-import type { MidiNoteEvent } from '../midi/types';
+import type { MidiEvent } from '../midi/types';
 import { barSpan, selectBars, withGuideTolerance } from './steps';
 
 /** What the session needs from the notation view (ScoreRenderer implements it). */
@@ -60,6 +60,13 @@ export class PracticeSession {
   currentBar = $state<number | null>(null);
   /** Held keys whose press was graded wrong (the only ones drawn red). */
   wrongHeld = $state<Set<number>>(new Set());
+  /**
+   * Notes let go of while they should still sound (a "keep holding" hint —
+   * never counted as a mistake). Cleared when re-pressed or once the note
+   * is no longer meant to be held.
+   */
+  releasedEarly = $state<number[]>([]);
+  #pedalDown = false;
   loopCount = $state(0);
   lastLoopErrors = $state(0);
   /** Set when a non-looping run finishes. */
@@ -169,6 +176,7 @@ export class PracticeSession {
 
   #beginPass(): void {
     this.wrongHeld = new Set();
+    this.releasedEarly = [];
     this.result = null;
     this.#mistakesByBar.clear();
     this.#renderer.reset();
@@ -177,8 +185,13 @@ export class PracticeSession {
     this.#sync();
   }
 
-  /** Feed one MIDI note event. */
-  handle(event: MidiNoteEvent): void {
+  /** Feed one MIDI event (notes and the sustain pedal). */
+  handle(event: MidiEvent): void {
+    if (event.type === 'pedal') {
+      this.#pedalDown = event.down;
+      if (event.down) this.releasedEarly = [];
+      return;
+    }
     if (event.type !== 'noteOn') {
       // Releasing a key clears its wrong-press state so it stops glowing red.
       if (this.wrongHeld.has(event.pitch)) {
@@ -186,6 +199,17 @@ export class PracticeSession {
         next.delete(event.pitch);
         this.wrongHeld = next;
       }
+      if (this.#mustKeepHolding(event.pitch)) {
+        this.releasedEarly = [...this.releasedEarly, event.pitch];
+      }
+      return;
+    }
+    if (this.releasedEarly.includes(event.pitch)) {
+      this.releasedEarly = this.releasedEarly.filter((p) => p !== event.pitch);
+    }
+    // Re-striking a note that should still be sounding (to hold it again) is
+    // fine — neither progress nor a mistake.
+    if (this.status === 'playing' && this.sustained.includes(event.pitch) && !this.expected.includes(event.pitch)) {
       return;
     }
     const bar = this.#steps[this.#engine.index]?.measure;
@@ -209,6 +233,17 @@ export class PracticeSession {
         return;
     }
     this.#sync();
+  }
+
+  /**
+   * Released while the score says it should still sound — and it keeps
+   * sounding past the next note to play (letting go right before a note's
+   * written end is normal, not worth a hint). The pedal sustains for you.
+   */
+  #mustKeepHolding(pitch: number): boolean {
+    if (this.#pedalDown || this.status !== 'playing') return false;
+    const i = this.#engine.index;
+    return !!this.#steps[i]?.sustained?.includes(pitch) && !!this.#steps[i + 1]?.sustained?.includes(pitch);
   }
 
   #complete(): void {
@@ -246,6 +281,11 @@ export class PracticeSession {
     this.chordName = step?.chordName ?? null;
     this.chordPitches = step?.chordPitches ?? [];
     this.currentBar = step?.measure ?? null;
+    // Drop hints for notes that no longer need holding at this step.
+    if (this.releasedEarly.length) {
+      const still = new Set(this.sustained);
+      this.releasedEarly = this.releasedEarly.filter((p) => still.has(p));
+    }
   }
 
   /** Crop the keyboard to the played range, never starting/ending on a black key. */

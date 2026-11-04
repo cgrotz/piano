@@ -23,9 +23,13 @@ describe('parseMidiMessage', () => {
     expect(parseMidiMessage(new Uint8Array([]))).toBeNull();
   });
 
-  it('returns null for control-change messages (0xB0)', () => {
-    const data = new Uint8Array([0xb0, 64, 127]);
-    expect(parseMidiMessage(data)).toBeNull();
+  it('returns null for other control-change messages (e.g. volume, CC7)', () => {
+    expect(parseMidiMessage(new Uint8Array([0xb0, 7, 100]))).toBeNull();
+  });
+
+  it('reports the sustain pedal (CC64) down and up', () => {
+    expect(parseMidiMessage(new Uint8Array([0xb0, 64, 127]))).toEqual({ type: 'pedal', down: true });
+    expect(parseMidiMessage(new Uint8Array([0xb0, 64, 0]))).toEqual({ type: 'pedal', down: false });
   });
 
   it('correctly parses note-on on different MIDI channels', () => {

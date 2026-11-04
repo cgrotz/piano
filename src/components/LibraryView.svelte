@@ -62,13 +62,43 @@
 
   const onlyBuiltIn = $derived(library.entries.every((e) => e.builtIn));
 
-  // Search appears once the list is long enough to need it.
+  // Search appears once the list is long enough to need it; sorting once there's a choice.
   let query = $state('');
   const showSearch = $derived(library.entries.length > 8);
+  const showSort = $derived(library.entries.length > 3);
+
+  type SortKey = 'recent' | 'title' | 'added';
+  const SORT_KEY = 'piano-tutor:library-sort';
+  let sort = $state<SortKey>(readSort());
+  function readSort(): SortKey {
+    try {
+      const v = localStorage.getItem(SORT_KEY);
+      return v === 'title' || v === 'added' ? v : 'recent';
+    } catch {
+      return 'recent';
+    }
+  }
+  function setSort(v: SortKey) {
+    sort = v;
+    try {
+      localStorage.setItem(SORT_KEY, v);
+    } catch {
+      /* per-device convenience only */
+    }
+  }
+
   const visible = $derived.by(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return library.entries;
-    return library.entries.filter((e) => `${e.title} ${e.composer}`.toLowerCase().includes(q));
+    const list = q ? library.entries.filter((e) => `${e.title} ${e.composer}`.toLowerCase().includes(q)) : [...library.entries];
+    const practised = (e: LibraryEntry) => loadSettings(e.id).lastPractised ?? 0;
+    const by: Record<SortKey, (a: LibraryEntry, b: LibraryEntry) => number> = {
+      // Recently practised first; never-practised pieces follow, newest import first.
+      recent: (a, b) => practised(b) - practised(a) || b.importedAt - a.importedAt,
+      title: (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }),
+      added: (a, b) => b.importedAt - a.importedAt
+    };
+    // The built-in exercise always stays on top.
+    return list.sort((a, b) => Number(!!b.builtIn) - Number(!!a.builtIn) || by[sort](a, b));
   });
 </script>
 
@@ -113,8 +143,19 @@
     <p class="error" role="alert">{library.error}</p>
   {/if}
 
-  {#if showSearch}
-    <input class="search" type="search" placeholder="Search title or composer" bind:value={query} aria-label="Search your library" />
+  {#if showSearch || showSort}
+    <div class="tools">
+      {#if showSearch}
+        <input class="search" type="search" placeholder="Search title or composer" bind:value={query} aria-label="Search your library" />
+      {/if}
+      {#if showSort}
+        <div class="segmented" role="group" aria-label="Sort by">
+          <button aria-pressed={sort === 'recent'} onclick={() => setSort('recent')}>Recent</button>
+          <button aria-pressed={sort === 'title'} onclick={() => setSort('title')}>A–Z</button>
+          <button aria-pressed={sort === 'added'} onclick={() => setSort('added')}>Added</button>
+        </div>
+      {/if}
+    </div>
   {/if}
 
   <ul class="list" aria-label="Scores">
@@ -231,15 +272,25 @@
     outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
     outline-offset: 2px;
   }
+  .tools {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 0.75rem;
+  }
+  .tools .segmented {
+    margin-left: auto;
+  }
   .search {
     font: inherit;
-    width: 100%;
+    flex: 1 1 14rem;
+    min-height: var(--tap);
     padding: 0.6rem 0.85rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     background: var(--surface);
     color: var(--text);
-    margin-bottom: 0.75rem;
   }
   .empty {
     color: var(--muted);

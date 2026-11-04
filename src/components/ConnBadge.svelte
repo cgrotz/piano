@@ -105,6 +105,15 @@
       opacity: 0.3;
     }
   }
+  /* Narrow screens: once connected, the green dot says it all. */
+  @media (max-width: 640px) {
+    .badge.ok .txt {
+      display: none;
+    }
+    .badge.ok {
+      padding: 0.32rem 0.6rem;
+    }
+  }
   .txt {
     overflow: hidden;
     text-overflow: ellipsis;
