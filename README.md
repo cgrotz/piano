@@ -72,6 +72,15 @@ Since v1:
 - **Bulk import** of several files at once, with titles/composers read from the score's
   printed credits when its metadata is empty.
 
+- **Listen.** The computer plays the piece (or the selected bars) at the metronome tempo,
+  every part with its own General-MIDI instrument, and the cursor follows the sound. First
+  step of the composer/accompaniment work planned in [COMPOSER.md](COMPOSER.md). Sounds come
+  from a GM SoundFont played by SpessaSynth (`src/lib/sound/`, behind the `SoundOut` port).
+  The sound bank is [GeneralUser GS](https://schristiancollins.com/generaluser.php) v2.0.3
+  (free for use in software; licence in `public/soundfonts/`). It's 32 MB, so it isn't
+  committed: `npm run soundfont` fetches a pinned, checksummed copy (the deploy workflow
+  does this too), and the service worker caches it on first use.
+
 The import layer uses the swappable `Unzip` port (`src/lib/import/unzip.ts`), its fflate
 implementation, and the `MusicImporter` that resolves `.mxl` via `META-INF/container.xml`.
 
@@ -147,11 +156,12 @@ npm run preview    # preview the production build
 src/
   lib/
     midi/      MIDI input: types, message parser, reactive controller (A1-A3)
-    score/     ScoreRenderer (OSMD), extractor (graded steps), validate
+    score/     ScoreRenderer (OSMD), extractor (graded steps), timeline (notes to play), validate
     engine/    GradingEngine (pure core loop)
     import/    Unzip port + fflate impl + MusicImporter (.mxl/container.xml)
     library/   IndexedDB store (db.ts) + reactive LibraryController
     metronome/ MetronomeController (Web Audio) + BPM / beats-per-bar helpers
+    sound/     SoundOut port, SpessaSynth implementation, TimelinePlayer, ListenController
     practice/  PracticeSession (one run: hand, bars, loop, grading state),
                keyLights (keyboard colours), bar-range/guide helpers
     samples/   bundled C-major-scale.musicxml

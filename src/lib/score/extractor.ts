@@ -157,7 +157,7 @@ export function getChordPitches(chord: ChordSymbolContainer): number[] {
  * entry per measure visit. Falls back to a plain linear pass if the iterator is
  * unavailable, so a score without repeats is unaffected either way.
  */
-function playbackMeasureOrder(osmd: OpenSheetMusicDisplay): number[] {
+export function playbackMeasureOrder(osmd: OpenSheetMusicDisplay): number[] {
   const measureCount = osmd.Sheet.SourceMeasures.length;
   const linear = () => Array.from({ length: measureCount }, (_, i) => i);
 

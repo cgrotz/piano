@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "soundfont": "sh scripts/fetch-soundfont.sh"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
@@ -28,6 +29,7 @@
   },
   "dependencies": {
     "fflate": "^0.8.2",
-    "opensheetmusicdisplay": "^2.0.0"
+    "opensheetmusicdisplay": "^2.0.0",
+    "spessasynth_lib": "^4.4.8"
   }
 }

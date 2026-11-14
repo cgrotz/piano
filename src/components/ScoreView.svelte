@@ -9,6 +9,8 @@
   import { loadSettings, saveSettings } from '../lib/library/settings';
   import { PracticeSession, type RunResult, type SessionRenderer } from '../lib/practice/session.svelte';
   import { keyLights } from '../lib/practice/keyLights';
+  import { ListenController } from '../lib/sound/listen.svelte';
+  import type { Timeline } from '../lib/score/timeline';
   import ConnBadge from './ConnBadge.svelte';
   import PianoKeyboard from './PianoKeyboard.svelte';
   import PracticeSetup, { type ViewMode } from './PracticeSetup.svelte';
@@ -43,6 +45,8 @@
   };
   const session = new PracticeSession(view, onComplete);
   const metronome = new MetronomeController();
+  const listen = new ListenController();
+  let timeline: Timeline | null = null;
 
   let loaded = $state(false);
   let error = $state<string | null>(null);
@@ -165,7 +169,10 @@
     document.addEventListener('visibilitychange', onVisibilityChange);
     darkQuery.addEventListener('change', onSchemeChange);
     acquireWakeLock();
-    unsubscribe = midi.subscribe((e) => session.handle(e));
+    // While the computer plays the piece, the keyboard isn't graded.
+    unsubscribe = midi.subscribe((e) => {
+      if (!listen.playing) session.handle(e);
+    });
     try {
       renderer = new ScoreRenderer(container, cursorColor());
       await renderer.load(xml, sheetLayout);
@@ -213,6 +220,7 @@
     clearTimeout(relayoutTimer);
     releaseWakeLock();
     metronome.dispose();
+    listen.dispose();
     unsubscribe?.();
     renderer?.dispose();
   });
@@ -257,11 +265,43 @@
       notice = midiHelp(midi.status);
       return;
     }
+    listen.stop();
     session.start();
     setupOpen = false;
     dismissedResult = false;
     newBest = false;
     saveSettings(id, { lastPractised: Date.now() });
+  }
+
+  /** Hear the piece (or the selected bars) played by the computer; again to stop. */
+  async function toggleListen() {
+    if (!renderer) return;
+    if (listen.status === 'playing' || listen.status === 'loading') {
+      listen.stop();
+      cursorBack();
+      return;
+    }
+    notice = null;
+    timeline ??= renderer.timeline();
+    renderer.reset();
+    renderer.clearHighlight();
+    await listen.play({
+      timeline,
+      bpm: metronome.bpm,
+      beatLength: renderer.beatLength,
+      fromBar: session.fromBar,
+      toBar: session.toBar,
+      onCursor: (i) => renderer?.moveToIndex(i),
+      onEnd: cursorBack
+    });
+  }
+
+  /** After listening, the cursor goes back to where practice is (or the start). */
+  function cursorBack() {
+    if (!renderer) return;
+    renderer.reset();
+    const at = session.cursorIndex;
+    if (at !== null) renderer.moveToIndex(at, false);
   }
 
   function playAgain() {
@@ -334,6 +374,21 @@
           <span class="bpm">{metronome.bpm}</span>
         </button>
       {/if}
+      <button
+        class="toggle listen"
+        aria-pressed={listen.status === 'playing' || listen.status === 'loading'}
+        onclick={toggleListen}
+        disabled={!loaded}
+        aria-label={listen.playing ? 'Stop listening' : 'Listen to the piece'}
+        title={listen.status === 'loading'
+          ? `Loading instrument sounds… ${Math.round(listen.progress * 100)}%`
+          : session.rangeOn
+            ? `Listen to ${scopeLabel} (${metronome.bpm} BPM)`
+            : `Listen (${metronome.bpm} BPM)`}>
+        <Icon name={listen.playing ? 'stop' : 'listen'} size={18} />
+        <span class="lbl"
+          >{listen.status === 'loading' ? `${Math.round(listen.progress * 100)}%` : listen.playing ? 'Stop' : 'Listen'}</span>
+      </button>
       <button class="ghost" onclick={() => (setupOpen = !setupOpen)} aria-expanded={setupOpen} aria-controls="practice-setup">
         <Icon name="settings" size={18} /> <span class="lbl">Setup</span>
       </button>
@@ -354,6 +409,9 @@
   {/if}
   {#if notice}
     <p class="banner" role="status">{notice}</p>
+  {/if}
+  {#if listen.error}
+    <p class="banner error" role="alert">{listen.error}</p>
   {/if}
 
   <div class="stage" bind:clientHeight={stageH}>

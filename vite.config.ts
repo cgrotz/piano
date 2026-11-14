@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -14,6 +15,8 @@ export default defineConfig(({ command }) => ({
   // service-worker scope / manifest start_url — both must match or the deployed page
   // goes blank). Dev serves from root for cleaner local URLs and preview tooling.
   base: command === 'build' ? '/piano/' : '/',
+  // Claude Code keeps parallel work in .claude/worktrees/ — not this checkout's tests.
+  test: { exclude: ['**/node_modules/**', '.claude/**'] },
   server: process.env.PORT ? { port: Number(process.env.PORT) } : undefined,
   plugins: [
     svelte(),
@@ -21,6 +24,17 @@ export default defineConfig(({ command }) => ({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: 'auto',
+      workbox: {
+        // The GM sound bank is big and only needed for "Listen"/accompaniment:
+        // cached the first time it's used, then served offline.
+        runtimeCaching: [
+          {
+            urlPattern: /\/soundfonts\/.+\.sf[23]$/,
+            handler: 'CacheFirst',
+            options: { cacheName: 'soundfonts', expiration: { maxEntries: 4 } }
+          }
+        ]
+      },
       manifest: {
         name: 'Piano Tutor',
         short_name: 'Piano Tutor',

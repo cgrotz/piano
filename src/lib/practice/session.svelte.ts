@@ -91,6 +91,11 @@ export class PracticeSession {
     return this.fromBar !== this.barFirst || this.toBar !== this.barLast;
   }
 
+  /** Cursor ordinal of the current step (where the visual cursor belongs), or null. */
+  get cursorIndex(): number | null {
+    return this.status === 'playing' ? (this.#steps[this.#engine.index]?.cursorIndex ?? null) : null;
+  }
+
   get bothHands(): boolean {
     return this.hand?.kind === 'both';
   }

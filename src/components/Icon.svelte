@@ -1,6 +1,6 @@
 <script lang="ts">
   /** A small, consistent icon set (24px grid, stroke icons) instead of emoji/glyphs. */
-  type Name = 'back' | 'play' | 'restart' | 'loop' | 'settings' | 'metronome' | 'check' | 'close' | 'plus' | 'music';
+  type Name = 'back' | 'play' | 'restart' | 'loop' | 'settings' | 'metronome' | 'check' | 'close' | 'plus' | 'music' | 'listen' | 'stop';
   let { name, size = 20 }: { name: Name; size?: number } = $props();
 </script>
 
@@ -32,6 +32,10 @@
     <path d="M6 6l12 12M18 6L6 18" />
   {:else if name === 'plus'}
     <path d="M12 5v14M5 12h14" />
+  {:else if name === 'listen'}
+    <path d="M4 14v-2a8 8 0 0 1 16 0v2" /><rect x="3" y="14" width="4" height="6" rx="1.5" /><rect x="17" y="14" width="4" height="6" rx="1.5" />
+  {:else if name === 'stop'}
+    <rect x="6.5" y="6.5" width="11" height="11" rx="1.5" fill="currentColor" />
   {:else if name === 'music'}
     <path d="M9 18V5l11-2v13" /><circle cx="6.5" cy="18" r="2.5" /><circle cx="17.5" cy="16" r="2.5" />
   {/if}

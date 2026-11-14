@@ -1,6 +1,7 @@
 import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import type { GraphicalNote } from 'opensheetmusicdisplay';
 import { extractSteps, type ExtractOptions, type GradedStep } from './extractor';
+import { extractTimeline, type Timeline } from './timeline';
 import type { StaffInfo } from './hands';
 import { beatsPerBar, beatUnitLength } from '../metronome/bpm';
 
@@ -196,6 +197,21 @@ export class ScoreRenderer {
     const left = box.scrollLeft + (c.left - b.left) - b.width * 0.3;
     const top = this.#layout === 'page' ? box.scrollTop + (c.top - b.top) - b.height * 0.25 : box.scrollTop;
     box.scrollTo({ left: Math.max(0, left), top: Math.max(0, top), behavior: smooth ? 'smooth' : 'auto' });
+  }
+
+  /**
+   * Length of one metronome beat in whole notes (bar length / beats per bar),
+   * so a BPM shown on the metronome converts to playback speed.
+   */
+  get beatLength(): number {
+    const ts = this.#osmd.Sheet?.SourceMeasures[0]?.ActiveTimeSignature;
+    const bar = ts && ts.Denominator > 0 ? ts.Numerator / ts.Denominator : 1;
+    return bar / this.beatsPerBar;
+  }
+
+  /** Every note to be heard, per part, for computer playback ("Listen"). */
+  timeline(): Timeline {
+    return extractTimeline(this.#osmd);
   }
 
   /** Extract the graded step sequence from the loaded score (component 7). */

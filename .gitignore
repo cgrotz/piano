@@ -3,3 +3,7 @@ dist
 dev-dist
 .DS_Store
 *.local
+
+# GM sound bank: large, licence-checked separately; see COMPOSER.md §4
+public/soundfonts/*.sf2
+public/soundfonts/*.sf3
