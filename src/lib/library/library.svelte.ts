@@ -1,7 +1,7 @@
 import { addScore, getAllScores, getScore, deleteScore, type ScoreRecord } from './db';
 import { createMusicImporter } from '../import/importer';
 import { fflateUnzip } from '../import/unzip.fflate';
-import { forgetSettings } from './settings';
+import { forgetSettings, hydrateSettings } from './settings';
 import builtinScaleXml from '../samples/c-major-scale.musicxml?raw';
 
 /** A row in the library list. Metadata only — XML is fetched on open via getXml(). */
@@ -34,6 +34,10 @@ export class LibraryController {
   /** While a batch import runs: files finished so far / total. */
   progress = $state<{ done: number; total: number } | null>(null);
   error = $state<string | null>(null);
+  /** Bumped whenever per-piece settings/progress change underneath (sync), so views re-read them. */
+  settingsVersion = $state(0);
+  /** Resolves once the library and settings have been read from storage. */
+  ready: Promise<void> = Promise.resolve();
 
   #importer = createMusicImporter(fflateUnzip);
 
@@ -42,11 +46,31 @@ export class LibraryController {
    * private-browsing modes) the built-in sample still works and the reason is
    * surfaced in `error` instead of an unhandled rejection and a silently empty list.
    */
-  async init(): Promise<void> {
+  init(): Promise<void> {
+    this.ready = this.#load();
+    return this.ready;
+  }
+
+  async #load(): Promise<void> {
     try {
+      await hydrateSettings();
       this.#apply(await getAllScores());
     } catch (err) {
       this.error = `Couldn't load your library: ${message(err)}`;
+    }
+  }
+
+  /** Re-read storage after a sync brought in changes. Never rejects. */
+  async reload(kinds: Iterable<string>): Promise<void> {
+    const set = new Set(kinds);
+    try {
+      if (set.has('settings') || set.has('progress')) {
+        await hydrateSettings();
+        this.settingsVersion++;
+      }
+      if (set.has('scores')) this.#apply(await getAllScores());
+    } catch {
+      /* keep showing what we have */
     }
   }
 
@@ -106,7 +130,10 @@ export class LibraryController {
     });
   }
 
-  /** Delete an imported score. Never rejects; failures land in `error`. */
+  /**
+   * Delete an imported score (kept as a tombstone so the deletion syncs).
+   * Never rejects; failures land in `error`.
+   */
   async remove(id: string): Promise<void> {
     this.error = null;
     try {

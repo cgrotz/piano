@@ -2,6 +2,8 @@
   import type { LibraryController, LibraryEntry } from '../lib/library/library.svelte';
   import { midiHelp, type MidiController } from '../lib/midi/midi.svelte';
   import ConnBadge from './ConnBadge.svelte';
+  import SyncBadge from './SyncBadge.svelte';
+  import type { SyncController } from '../lib/sync/sync.svelte';
   import { loadSettings } from '../lib/library/settings';
 
   const iconUrl = `${import.meta.env.BASE_URL}icon.svg`;
@@ -9,10 +11,13 @@
   let {
     library,
     midi,
+    sync = null,
     onOpen
   }: {
     library: LibraryController;
     midi: MidiController;
+    /** Present only when a sync provider is configured. */
+    sync?: SyncController | null;
     onOpen: (entry: LibraryEntry) => void;
   } = $props();
 
@@ -51,6 +56,7 @@
 
   /** Composer · bars · when last practised · best whole-piece accuracy. */
   function meta(entry: LibraryEntry): string[] {
+    void library.settingsVersion;
     const s = loadSettings(entry.id);
     const parts: string[] = [];
     if (!entry.builtIn && entry.composer && entry.composer !== 'Unknown') parts.push(entry.composer);
@@ -90,6 +96,7 @@
   const visible = $derived.by(() => {
     const q = query.trim().toLowerCase();
     const list = q ? library.entries.filter((e) => `${e.title} ${e.composer}`.toLowerCase().includes(q)) : [...library.entries];
+    void library.settingsVersion;
     const practised = (e: LibraryEntry) => loadSettings(e.id).lastPractised ?? 0;
     const by: Record<SortKey, (a: LibraryEntry, b: LibraryEntry) => number> = {
       // Recently practised first; never-practised pieces follow, newest import first.
@@ -109,6 +116,7 @@
       <span>Piano Tutor</span>
     </div>
     <div class="head-actions">
+      {#if sync}<SyncBadge {sync} />{/if}
       <ConnBadge {midi} />
       <label class="filebtn" class:busy={library.importing} aria-busy={library.importing}>
         {#if !library.importing}
