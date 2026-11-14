@@ -38,6 +38,10 @@ export interface SettingsValues {
   from?: number;
   to?: number;
   loop?: boolean;
+  /** Show the score's non-piano parts (e.g. a vocal line) while practising the piano. */
+  otherParts?: boolean;
+  /** Backing band for Listen: 'none' or a band preset id. */
+  band?: string;
 }
 
 /**

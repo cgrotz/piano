@@ -1,7 +1,8 @@
 import { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
-import type { GraphicalNote } from 'opensheetmusicdisplay';
-import { extractSteps, type ExtractOptions, type GradedStep } from './extractor';
+import { NoteHeadShape, type GraphicalNote } from 'opensheetmusicdisplay';
+import { extractSteps, playbackMeasureOrder, type ExtractOptions, type GradedStep } from './extractor';
 import { extractTimeline, type Timeline } from './timeline';
+import { friendlyPartName, instrumentSounds } from './partNames';
 import type { StaffInfo } from './hands';
 import { beatsPerBar, beatUnitLength } from '../metronome/bpm';
 
@@ -50,8 +51,13 @@ export class ScoreRenderer {
     });
   }
 
+  /** Part id → MusicXML `<instrument-sound>` (for readable part names). */
+  #sounds = new Map<string, string>();
+
   async load(xml: string, layout: SheetLayout = 'line'): Promise<void> {
     await this.#osmd.load(xml);
+    this.#sounds = instrumentSounds(xml);
+    this.#computeStops();
     this.#cursorIndex = 0;
     this.layout(layout);
   }
@@ -115,17 +121,51 @@ export class ScoreRenderer {
   }
 
   /**
+   * Per container ordinal (playback order, repeats expanded): does OSMD's
+   * cursor stop there? `cursor.next()` skips containers with nothing visible —
+   * only notes of a hidden part, or only `print-object="no"` notes — so moving
+   * by ordinal must skip them too, or the cursor runs ahead of the music.
+   */
+  #stops: boolean[] = [];
+
+  #computeStops(): void {
+    const sheet = this.#osmd.Sheet;
+    const stops: boolean[] = [];
+    for (const m of playbackMeasureOrder(this.#osmd)) {
+      for (const container of sheet.SourceMeasures[m].VerticalSourceStaffEntryContainers) {
+        stops.push(
+          container.StaffEntries.some((entry) =>
+            entry?.VoiceEntries.some(
+              (ve) => ve.ParentVoice.Visible && ve.Notes.some((n) => n.PrintObject && n.Notehead?.Shape !== NoteHeadShape.NONE)
+            )
+          )
+        );
+      }
+    }
+    this.#stops = stops;
+  }
+
+  /**
    * Move the cursor forward to a container ordinal (a GradedStep.cursorIndex).
-   * Forward-only: grading never moves backward within a run.
+   * Forward-only: grading never moves backward within a run. Containers the
+   * cursor doesn't stop at are passed over without a `next()`.
    */
   moveToIndex(target: number, smooth = true): void {
     const cursor = this.#osmd.cursor;
-    while (this.#cursorIndex < target && !cursor.iterator?.EndReached) {
-      cursor.next();
-      this.#cursorIndex++;
+    for (let j = this.#cursorIndex + 1; j <= target && !cursor.iterator?.EndReached; j++) {
+      if (this.#stops[j] ?? true) cursor.next();
     }
+    this.#cursorIndex = Math.max(this.#cursorIndex, target);
     cursor.update();
     this.#scrollToCursor(smooth);
+  }
+
+  /** MIDI pitches of the notes under the cursor (diagnostics and tests). */
+  notesUnderCursor(): number[] {
+    return this.#osmd.cursor
+      .GNotesUnderCursor()
+      .filter((g) => g.sourceNote.Pitch && !g.sourceNote.isRest())
+      .map((g) => g.sourceNote.halfTone + 12);
   }
 
   /** Hide the cursor (e.g. on completion). */
@@ -148,13 +188,37 @@ export class ScoreRenderer {
       part.Staves.forEach((staff, k) => {
         out.push({
           index: sheet.Staves.indexOf(staff),
-          partName: part.Name?.trim() || `Part ${p + 1}`,
+          partName:
+            friendlyPartName(part.Name ?? '', this.#sounds.get(part.IdString), Number(part.MidiInstrumentId)) ||
+            `Part ${p + 1}`,
           partStaffIndex: k,
           partStaffCount: part.Staves.length
         });
       });
     });
     return out.sort((a, b) => a.index - b.index);
+  }
+
+  /**
+   * Show only the parts that own one of `staves` (null = every part), e.g. to
+   * hide a vocal line above the piano. Display only: grading, the cursor's
+   * stop sequence and playback still see the whole score. Re-renders.
+   */
+  showParts(staves: number[] | null): void {
+    const sheet = this.#osmd.Sheet;
+    if (!sheet) return;
+    let changed = false;
+    for (const part of sheet.Instruments) {
+      const visible = !staves || part.Staves.some((s) => staves.includes(sheet.Staves.indexOf(s)));
+      if (part.Visible !== visible) {
+        part.Visible = visible;
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.#computeStops();
+      this.layout();
+    }
   }
 
   /** Score's notated tempo in BPM, or 0 if the file carries none. */

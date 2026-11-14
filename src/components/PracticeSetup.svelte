@@ -16,6 +16,8 @@
     metronome,
     view = $bindable(),
     band = $bindable(),
+    showOthers = $bindable(),
+    otherParts,
     started,
     loaded,
     nameOf,
@@ -30,6 +32,10 @@
     view: ViewMode;
     /** Backing band for "Listen": 'none' or a BAND_PRESETS id. */
     band: string;
+    /** Whether non-piano parts are shown on the sheet. */
+    showOthers: boolean;
+    /** Names of the score's non-piano parts (empty: no toggle). */
+    otherParts: string[];
     started: boolean;
     loaded: boolean;
     nameOf: (h: HandOption) => string;
@@ -149,6 +155,16 @@
         <button class="ghost round" onclick={() => (metronome.bpm = clampBpm(metronome.bpm + 5, metronome.bpm))} aria-label="Faster">+</button>
       </div>
       <span class="hint">for the metronome</span>
+    </div>
+  {/if}
+
+  {#if otherParts.length > 0 && session.hand?.kind !== 'other'}
+    <div class="row">
+      <span class="label" id="lbl-parts">Sheet</span>
+      <button class="toggle" aria-pressed={showOthers} onclick={() => (showOthers = !showOthers)}>
+        Show {otherParts.join(', ')}
+      </button>
+      <span class="hint">{showOthers ? 'shown above the piano' : 'hidden — only the piano staves'}</span>
     </div>
   {/if}
 

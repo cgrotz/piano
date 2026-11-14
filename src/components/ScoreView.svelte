@@ -50,11 +50,16 @@
   let timeline: Timeline | null = null;
   // Backing band for Listen ('none' = just the score); timelines cached per band.
   let band = $state('none');
+  // Non-piano parts (a vocal line above the piano) are hidden by default while
+  // practising the piano; one toggle in Setup brings them back.
+  let showOthers = $state(false);
   const bandTimelines = new Map<string, Timeline>();
 
   let loaded = $state(false);
   let error = $state<string | null>(null);
   let hands = $state<HandOption[]>([]);
+  const pianoHands = $derived(hands.filter((h) => h.kind !== 'other'));
+  const otherParts = $derived(pianoHands.length > 0 ? hands.filter((h) => h.kind === 'other').map((h) => h.label) : []);
   let handSteps = $state<Record<string, number>>({});
   let hasChords = $state(false);
   let viewMode = $state<ViewMode>('both');
@@ -206,8 +211,12 @@
       session.loop = !!saved.loop;
       if (saved.view) viewMode = saved.view;
       if (saved.bpm) metronome.bpm = clampBpm(saved.bpm, metronome.bpm);
+      if (saved.otherParts !== undefined) showOthers = saved.otherParts;
+      if (saved.band) band = saved.band;
       session.prepare(hand, saved.from, saved.to);
       loaded = true;
+      // Dev-only: lets automation inspect the player. Stripped from prod.
+      if (import.meta.env.DEV) (window as unknown as { pianoPlayer: unknown }).pianoPlayer = { session, renderer };
 
       resizeObserver = new ResizeObserver(scheduleRelayout);
       resizeObserver.observe(container);
@@ -238,9 +247,20 @@
       guide: session.showGuide,
       from: session.fromBar,
       to: session.toBar,
-      loop: session.loop
+      loop: session.loop,
+      otherParts: showOthers,
+      band
     };
     if (loaded) saveSettings(id, patch);
+  });
+
+  // Only the piano's staves on the stand — unless asked, or a non-piano part is being practised.
+  $effect(() => {
+    if (!loaded || !renderer) return;
+    const piano = [...new Set(pianoHands.flatMap((h) => h.staves))];
+    const hide = otherParts.length > 0 && !showOthers && session.hand?.kind !== 'other';
+    renderer.showParts(hide ? piano : null);
+    lastLaidOut = { w: container.clientWidth, h: container.clientHeight, layout: sheetLayout };
   });
 
   // The cursor wears the colour of the hand being practised.
@@ -444,6 +464,8 @@
           {metronome}
           bind:view={viewMode}
           bind:band
+          bind:showOthers
+          {otherParts}
           {started}
           {loaded}
           {nameOf}
