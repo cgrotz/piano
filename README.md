@@ -80,6 +80,10 @@ Since v1:
   (free for use in software; licence in `public/soundfonts/`). It's 32 MB, so it isn't
   committed: `npm run soundfont` fetches a pinned, checksummed copy (the deploy workflow
   does this too), and the service worker caches it on first use.
+- **Backing band (preview).** Setup → *Band* adds generated parts to Listen — pop band,
+  ballad, strings, jazz trio, harp & bass. Chords come from the score's chord symbols or a
+  rule-based analysis of melody and left hand; bass, pads, arpeggios, guitar comping,
+  drums and a second voice are generated from them (`src/lib/arrange/`).
 
 The import layer uses the swappable `Unzip` port (`src/lib/import/unzip.ts`), its fflate
 implementation, and the `MusicImporter` that resolves `.mxl` via `META-INF/container.xml`.
@@ -161,6 +165,7 @@ src/
     import/    Unzip port + fflate impl + MusicImporter (.mxl/container.xml)
     library/   IndexedDB store (db.ts) + reactive LibraryController
     metronome/ MetronomeController (Web Audio) + BPM / beats-per-bar helpers
+    arrange/   music theory, harmony analysis, part generators, band presets
     sound/     SoundOut port, SpessaSynth implementation, TimelinePlayer, ListenController
     practice/  PracticeSession (one run: hand, bars, loop, grading state),
                keyLights (keyboard colours), bar-range/guide helpers

@@ -69,7 +69,10 @@ export class TimelinePlayer {
 
   /** Set each part's instrument (program change per channel). */
   setParts(parts: PlayedPart[]): void {
-    for (const p of parts) this.#out.program(p.channel, p.program);
+    for (const p of parts) {
+      if (p.channel !== 9) this.#out.program(p.channel, p.program); // channel 10 keeps its drum kit
+      this.#out.volume(p.channel, p.volume ?? 100);
+    }
   }
 
   start(opts: PlayOptions): void {
@@ -128,7 +131,8 @@ export class TimelinePlayer {
       const off = Math.max(at + 0.02, this.#timeOf(end) - 0.01);
       this.#out.noteOn(n.channel, n.pitch, n.velocity, Math.max(at, now));
       this.#out.noteOff(n.channel, n.pitch, off);
-      if (n.cursorIndex !== this.#lastCursor) {
+      // Generated parts have no notehead to point at (cursorIndex < 0).
+      if (n.cursorIndex >= 0 && n.cursorIndex !== this.#lastCursor) {
         this.#cursorQueue.push({ time: at, cursorIndex: n.cursorIndex });
         this.#lastCursor = n.cursorIndex;
       }

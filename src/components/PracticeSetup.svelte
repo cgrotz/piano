@@ -3,6 +3,7 @@
   import type { HandOption } from '../lib/score/hands';
   import type { MetronomeController } from '../lib/metronome/metronome.svelte';
   import { clampBpm, MIN_BPM, MAX_BPM } from '../lib/metronome/bpm';
+  import { BAND_PRESETS } from '../lib/arrange/band';
   import Icon from './Icon.svelte';
 
   export type ViewMode = 'both' | 'notes' | 'piano';
@@ -14,6 +15,7 @@
     hasChords,
     metronome,
     view = $bindable(),
+    band = $bindable(),
     started,
     loaded,
     nameOf,
@@ -26,6 +28,8 @@
     hasChords: boolean;
     metronome: MetronomeController;
     view: ViewMode;
+    /** Backing band for "Listen": 'none' or a BAND_PRESETS id. */
+    band: string;
     started: boolean;
     loaded: boolean;
     nameOf: (h: HandOption) => string;
@@ -148,6 +152,17 @@
     </div>
   {/if}
 
+  <div class="row">
+    <span class="label" id="lbl-band" title="Who plays along when you press Listen">Band</span>
+    <div class="segmented band" role="group" aria-labelledby="lbl-band">
+      <button aria-pressed={band === 'none'} onclick={() => (band = 'none')}>Score only</button>
+      {#each BAND_PRESETS as p (p.id)}
+        <button aria-pressed={band === p.id} onclick={() => (band = p.id)}>{p.label}</button>
+      {/each}
+    </div>
+    <span class="hint">plays along on Listen, from the melody and chords</span>
+  </div>
+
   <div class="actions">
     {#if started}
       <button class="ghost" onclick={onClose}>Done</button>
@@ -175,6 +190,14 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 0.6rem 0.9rem;
+  }
+  .segmented.band {
+    flex-wrap: wrap;
+    border-radius: 1.4rem;
+  }
+  .segmented.band button {
+    white-space: nowrap;
+    padding-inline: 0.8rem;
   }
   .label {
     width: 4.2rem;

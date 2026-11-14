@@ -5,7 +5,13 @@ open decisions marked ❓**.
 
 **Decided (2026-11-14):** sound = General-MIDI SoundFont via a JS synth (§4); the
 accompaniment **waits for the player** (§5); sync provider = **Google Drive** app data
-folder (§7); build starts with steps 1–2 (sound engine + "Listen" preview). The practice mode (grading) stays as it is; this adds three
+folder (§7); build starts with steps 1–2 (sound engine + "Listen" preview).
+
+**Progress:** steps 1–2 done (Listen). Steps 3–4 done as pure logic in
+`src/lib/arrange/` — `harmony.ts` (chord symbols or Viterbi analysis), `generators.ts`
+(bass, pad, arpeggio, comp, drums, second voice) and `band.ts` (five presets, heard via
+Setup → Band + Listen). Not yet: the `Arrangement` store and chord corrections (they wait
+for the storage migration of step 7), the composer UI (step 5), the follower (step 6). The practice mode (grading) stays as it is; this adds three
 things on top of it:
 
 1. **Composer** — arrange a library piece: add instruments, remove/mute existing parts.

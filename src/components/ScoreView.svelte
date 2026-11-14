@@ -11,6 +11,7 @@
   import { keyLights } from '../lib/practice/keyLights';
   import { ListenController } from '../lib/sound/listen.svelte';
   import type { Timeline } from '../lib/score/timeline';
+  import { BAND_PRESETS, withBand, type Roles } from '../lib/arrange/band';
   import ConnBadge from './ConnBadge.svelte';
   import PianoKeyboard from './PianoKeyboard.svelte';
   import PracticeSetup, { type ViewMode } from './PracticeSetup.svelte';
@@ -47,6 +48,9 @@
   const metronome = new MetronomeController();
   const listen = new ListenController();
   let timeline: Timeline | null = null;
+  // Backing band for Listen ('none' = just the score); timelines cached per band.
+  let band = $state('none');
+  const bandTimelines = new Map<string, Timeline>();
 
   let loaded = $state(false);
   let error = $state<string | null>(null);
@@ -283,10 +287,16 @@
     }
     notice = null;
     timeline ??= renderer.timeline();
+    const preset = BAND_PRESETS.find((p) => p.id === band);
+    let playing = timeline;
+    if (preset) {
+      if (!bandTimelines.has(preset.id)) bandTimelines.set(preset.id, withBand(timeline, preset, roles()));
+      playing = bandTimelines.get(preset.id)!;
+    }
     renderer.reset();
     renderer.clearHighlight();
     await listen.play({
-      timeline,
+      timeline: playing,
       bpm: metronome.bpm,
       beatLength: renderer.beatLength,
       fromBar: session.fromBar,
@@ -294,6 +304,15 @@
       onCursor: (i) => renderer?.moveToIndex(i),
       onEnd: cursorBack
     });
+  }
+
+  /** Melody = the piano's right hand (or the first staff); bass evidence = its left hand / the rest. */
+  function roles(): Roles {
+    const right = hands.find((h) => h.kind === 'right');
+    const left = hands.find((h) => h.kind === 'left');
+    if (right && left) return { melodyStaves: right.staves, bassStaves: left.staves };
+    const all = renderer?.staves.map((s) => s.index) ?? [0];
+    return { melodyStaves: [all[0] ?? 0], bassStaves: all.slice(1) };
   }
 
   /** After listening, the cursor goes back to where practice is (or the start). */
@@ -424,6 +443,7 @@
           {hasChords}
           {metronome}
           bind:view={viewMode}
+          bind:band
           {started}
           {loaded}
           {nameOf}
