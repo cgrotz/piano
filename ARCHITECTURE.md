@@ -37,8 +37,12 @@ in **one JS runtime** — there is no WebView and no JS bridge.
    (`work-title`/`movement-title`/`creator`, fallback to filename). The zip primitive sits
    behind an **`Unzip` port** (fflate impl); the `.mxl` container logic depends only on the
    port, so swapping zip libs is a one-file change.
-5. **Library store (IndexedDB)** — records `{ id, title, composer, importedAt, xml,
-   trackedVoice }`. CRUD: list, open, delete. Stores **raw MusicXML**, re-parsed on open.
+5. **Library store (IndexedDB)** — one store per record kind: `scores`
+   `{ id, title, composer, importedAt, xml, bars }`, `settings` (per-piece preferences
+   with per-field timestamps), `progress` (best accuracy, last practised) and
+   `arrangements` (composer, upcoming). Every record has `updatedAt`; deleting leaves a
+   tombstone (`deleted: true`). Stores **raw MusicXML**, re-parsed on open. An `outbox`
+   queues local changes for the optional sync (`src/lib/sync/`, COMPOSER.md §7).
 6. **Notation renderer** — OSMD instance in the page: load score, show cursor,
    next/reset, set/reset a note's color. Auto-scroll to keep the current note visible;
    responsive layout for tablet.

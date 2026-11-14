@@ -2,6 +2,7 @@
   import { MidiController } from './lib/midi/midi.svelte';
   import { LibraryController, type LibraryEntry } from './lib/library/library.svelte';
   import LibraryView from './components/LibraryView.svelte';
+  import type { SyncController } from './lib/sync/sync.svelte';
 
   // The player pulls in OSMD (most of the bundle), so it's loaded on demand —
   // the library appears straight away — and prefetched once the app is idle.
@@ -15,6 +16,19 @@
   library.init();
   midi.reconnectIfGranted();
 
+  // Optional Drive sync: only built in when an OAuth client ID is configured,
+  // and only loaded then — without one the app behaves exactly as before.
+  let sync = $state<SyncController | null>(null);
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
+  if (googleClientId) {
+    import('./lib/sync/sync.svelte').then(async ({ SyncController }) => {
+      await library.ready;
+      const s = new SyncController(googleClientId, (kinds) => library.reload(kinds));
+      sync = s;
+      s.start();
+    });
+  }
+
   // Dev-only: lets the preview/automation drive notes without hardware. Stripped from prod.
   if (import.meta.env.DEV) (window as unknown as { pianoMidi: MidiController }).pianoMidi = midi;
 
@@ -25,6 +39,7 @@
   async function openEntry(entry: LibraryEntry) {
     openError = null;
     try {
+      await library.ready; // per-piece settings must be loaded before the player reads them
       const xml = await library.getXml(entry);
       selection = { id: entry.id, xml, title: entry.title };
     } catch (err) {
@@ -51,7 +66,7 @@
       {/await}
     {/key}
   {:else}
-    <LibraryView {library} {midi} onOpen={openEntry} />
+    <LibraryView {library} {midi} {sync} onOpen={openEntry} />
   {/if}
 </main>
 

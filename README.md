@@ -145,6 +145,53 @@ One-time setup:
 
 It deploys to `https://<you>.github.io/piano/`.
 
+## Sync across devices (optional, Google Drive)
+
+The app is local-first: everything lives in IndexedDB and works offline without an
+account. Optionally, the library, per-piece settings and practice progress can follow
+you between devices (e.g. the Android tablet and a desktop) through **Google Drive**.
+
+- Data goes to Drive's hidden **app data folder** (`drive.appdata` scope): invisible in
+  your Drive, and the app can't see any of your other files. One file per record; each
+  score's MusicXML is its own file.
+- Sync runs on start, when the app is focused or hidden, when the network returns, and
+  every minute while open. Conflicts: last writer wins per piece; settings merge per
+  field (tempo changed on one device, hand on the other → both kept); progress keeps the
+  best score and latest practice date. Deletions sync too (as tombstones, purged after
+  90 days).
+- Browser-only sign-in (Google Identity Services, no backend), so there are no refresh
+  tokens: a token lasts about an hour. When the app is reopened after that, the library
+  shows **Sign in to sync** again; one tap renews it, usually without any dialog.
+
+**Without a client ID the sync UI is hidden and the app behaves exactly as without
+sync.** To enable it:
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a project
+   (e.g. "Piano Tutor").
+2. **APIs & Services → Library**: enable the **Google Drive API**.
+3. **APIs & Services → OAuth consent screen** (Google Auth Platform): user type
+   *External*, app name, support email. Under **Data access** add the scope
+   `https://www.googleapis.com/auth/drive.appdata` (a non-sensitive scope, so no
+   security review). While the app is in *Testing* status, add your Google account
+   under **Audience → Test users**; publish it when others should be able to sign in.
+4. **APIs & Services → Credentials → Create credentials → OAuth client ID**, type
+   *Web application*. **Authorized JavaScript origins:**
+   - `https://<you>.github.io` (the Pages origin — no `/piano/` path)
+   - `http://localhost:5173` (and any other dev port you use, e.g. `https://<LAN-IP>:5173`
+     for `npm run dev:https`)
+
+   No redirect URIs are needed (the token client uses a popup).
+5. Give the client ID to the build — it is public, not a secret:
+   - **Locally:** create `.env.local` with
+     `VITE_GOOGLE_CLIENT_ID=1234-abc.apps.googleusercontent.com` (git-ignored).
+   - **GitHub Pages:** in the repo, **Settings → Secrets and variables → Actions →
+     Variables → New repository variable** `GOOGLE_CLIENT_ID`; the deploy workflow passes
+     it to the build.
+
+Then tap **Sign in to sync** in the library on each device. The first sync uploads what
+is already on the device and merges it with what's in Drive. **Stop syncing** (in the
+sync pill's menu) signs this device out; its local library stays.
+
 ## Other scripts
 
 ```sh
@@ -163,7 +210,10 @@ src/
     score/     ScoreRenderer (OSMD), extractor (graded steps), timeline (notes to play), validate
     engine/    GradingEngine (pure core loop)
     import/    Unzip port + fflate impl + MusicImporter (.mxl/container.xml)
-    library/   IndexedDB store (db.ts) + reactive LibraryController
+    library/   IndexedDB store (db.ts: scores, settings, progress, arrangements +
+               sync outbox), per-piece settings cache, reactive LibraryController
+    sync/      SyncProvider port, merge rules, SyncEngine, Google Drive provider,
+               Google sign-in, reactive SyncController (scheduling)
     metronome/ MetronomeController (Web Audio) + BPM / beats-per-bar helpers
     arrange/   music theory, harmony analysis, part generators, band presets
     sound/     SoundOut port, SpessaSynth implementation, TimelinePlayer, ListenController
@@ -177,6 +227,7 @@ src/
     CompletionDialog.svelte  result + trouble bars
     PianoKeyboard.svelte     on-screen keyboard (target / held / wrong / beat flash)
     ConnBadge.svelte         MIDI connection status + connect button
+    SyncBadge.svelte         Drive sync status, "Sign in to sync", sync menu
     Icon.svelte              small SVG icon set
   App.svelte                shell: library/player switching, MIDI auto-reconnect
 ```
